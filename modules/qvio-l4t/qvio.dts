@@ -1,0 +1,16 @@
+/dts-v1/;
+ 
+/ {
+	overlay-name = "qvio-l4t";
+	jetson-header-name = "Jetson 40pin Header";
+	compatible = "nvidia,p3768-0000+p3767-0001";
+ 
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			qvio-l4t {
+				compatible = "yuan,qvio-l4t";
+			};
+		};
+	};
+};
