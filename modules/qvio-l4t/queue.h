@@ -13,9 +13,6 @@ struct qvio_queue {
 	struct v4l2_format current_format;
 	__u32 sequence;
 	int halign, valign;
-
-	// kthread for data pull
-	struct task_struct* task;
 };
 
 void qvio_queue_init(struct qvio_queue* self);

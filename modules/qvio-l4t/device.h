@@ -8,7 +8,7 @@
 #include <linux/pci.h>
 #include <linux/cdev.h>
 
-#define QVIO_MAX_VIDEO 32
+#define QVIO_MAX_VIDEO 1
 
 struct qvio_device {
 	struct kref ref;

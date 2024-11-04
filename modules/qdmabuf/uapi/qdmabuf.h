@@ -38,6 +38,8 @@ struct qdmabuf_alloc_args {
 
 struct qdmabuf_info_args {
 	__u32 fd;
+	__u32 size;
+	__u32 phy_addr;
 };
 
 #define QDMABUF_IOC_MAGIC		'Q'

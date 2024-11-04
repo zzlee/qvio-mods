@@ -10,7 +10,7 @@ qvio-objs := \
 	device.o \
 	cdev.o \
 	video.o \
-	user_job.o \
+	umods.o \
 	platform_device.o
 
 ccflags-y += \

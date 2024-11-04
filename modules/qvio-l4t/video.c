@@ -1,7 +1,6 @@
 #define pr_fmt(fmt)     "[" KBUILD_MODNAME "]%s(#%d): " fmt, __func__, __LINE__
 
 #include "video.h"
-#include "user_job.h"
 
 #include <linux/kernel.h>
 #include <linux/version.h>
@@ -10,7 +9,6 @@
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-ctrls.h>
-#include <linux/anon_inodes.h>
 
 static int __ioctl_querycap(struct file *file, void *fh, struct v4l2_capability *capability);
 static int __ioctl_enum_fmt(struct file *file, void *fh, struct v4l2_fmtdesc *format);
@@ -28,7 +26,6 @@ static int __ioctl_s_parm(struct file *file, void *fh, struct v4l2_streamparm *p
 static int __ioctl_enum_framesizes(struct file *file, void *fh, struct v4l2_frmsizeenum *frame_sizes);
 static int __ioctl_enum_frameintervals(struct file *file, void *fh, struct v4l2_frmivalenum *frame_intervals);
 static long __ioctl_default(struct file *file, void *fh, bool valid_prio, unsigned int cmd, void *arg);
-static int __anon_fd(const char* name, const struct file_operations *fops, void *priv, int flags);
 
 static const struct v4l2_file_operations __video_fops = {
 	.owner          = THIS_MODULE    ,
@@ -93,7 +90,6 @@ struct qvio_video* qvio_video_new(void) {
 	self->buffer_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	self->halign = 0x40;
 	self->valign = 1;
-	qvio_user_job_start(&self->user_job_ctrl);
 
 	return self;
 }
@@ -111,7 +107,6 @@ static void __video_free(struct kref *ref)
 
 	pr_info("\n");
 
-	qvio_user_job_stop(&self->user_job_ctrl);
 	kfree(self);
 }
 
@@ -521,10 +516,12 @@ static int __ioctl_s_fmt(struct file *file, void *fh, struct v4l2_format *format
 		goto err0;
 	}
 
+#if 0 // TODO
 	err = qvio_user_job_s_fmt(&self->user_job_ctrl, format);
 	if(err) {
 		pr_warn("qvio_user_job_s_fmt() failed, err=%d", err);
 	}
+#endif
 
 	return 0;
 
@@ -857,38 +854,6 @@ err0:
 	return err;
 }
 
-static int __anon_fd(const char* name, const struct file_operations *fops, void *priv, int flags) {
-	int err;
-	int fd;
-	struct file* file;
-
-	fd = get_unused_fd_flags(flags);
-	if (fd < 0) {
-		pr_err("get_unused_fd_flags() failed, fd=%d\n", fd);
-
-		err = fd;
-		goto err0;
-	}
-
-	file = anon_inode_getfile(name, fops, priv, flags);
-	if (IS_ERR(file)) {
-		err = PTR_ERR(file);
-		pr_err("anon_inode_getfile() failed, err=%d\n", err);
-
-		goto err1;
-	}
-
-	fd_install(fd, file);
-	err = fd;
-
-	return err;
-
-err1:
-	put_unused_fd(fd);
-err0:
-	return err;
-}
-
 static long __ioctl_default(struct file *file, void *fh, bool valid_prio, unsigned int cmd, void *arg) {
 	long ret;
 	struct qvio_video* self = video_drvdata(file);
@@ -898,6 +863,7 @@ static long __ioctl_default(struct file *file, void *fh, bool valid_prio, unsign
 #endif
 
 	switch(cmd) {
+#if 0
 	case QVID_IOC_USER_JOB_FD: {
 		int* pFd = (int*)arg;
 
@@ -911,6 +877,7 @@ static long __ioctl_default(struct file *file, void *fh, bool valid_prio, unsign
 	case QVID_IOC_BUF_DONE:
 		ret = qvio_video_buf_done(self);
 		break;
+#endif
 
 	default:
 		ret = -ENOIOCTLCMD;

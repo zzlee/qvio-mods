@@ -5,7 +5,7 @@
 
 #include <linux/kernel.h>
 #include <media/videobuf2-v4l2.h>
-#include <media/videobuf2-vmalloc.h>
+#include <media/videobuf2-dma-contig.h>
 
 struct qvio_queue_buffer {
 	struct vb2_v4l2_buffer vb;
@@ -38,6 +38,7 @@ static int __queue_setup(struct vb2_queue *queue,
 	struct device *alloc_devs[]) {
 	int err = 0;
 	struct qvio_queue* self = container_of(queue, struct qvio_queue, queue);
+	struct qvio_video* video = container_of(self, struct qvio_video, queue);
 
 	pr_info("+param %d %d\n", *num_buffers, *num_planes);
 
@@ -46,22 +47,24 @@ static int __queue_setup(struct vb2_queue *queue,
 
 	switch(self->current_format.type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
-	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
 		*num_planes = 1;
 		switch(self->current_format.fmt.pix.pixelformat) {
 		case V4L2_PIX_FMT_YUYV:
 			sizes[0] = ALIGN(self->current_format.fmt.pix.width * 2, self->halign) *
 				ALIGN(self->current_format.fmt.pix.height, self->valign);
+			alloc_devs[0] = video->qdev->dev;
 			break;
 
 		case V4L2_PIX_FMT_NV12:
 			sizes[0] = ALIGN(self->current_format.fmt.pix.width, self->halign) *
 				ALIGN(self->current_format.fmt.pix.height, self->valign) * 3 / 2;
+			alloc_devs[0] = video->qdev->dev;
 			break;
 
 		case V4L2_PIX_FMT_M420:
 			sizes[0] = ALIGN(self->current_format.fmt.pix.width, self->halign) *
 				ALIGN(self->current_format.fmt.pix.height * 3 / 2, self->valign);
+			alloc_devs[0] = video->qdev->dev;
 			break;
 
 		default:
@@ -73,12 +76,12 @@ static int __queue_setup(struct vb2_queue *queue,
 		break;
 
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
-	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		switch(self->current_format.fmt.pix_mp.pixelformat) {
 		case V4L2_PIX_FMT_YUYV:
 			*num_planes = 1;
 			sizes[0] = ALIGN(self->current_format.fmt.pix_mp.width * 2, self->halign) *
 				ALIGN(self->current_format.fmt.pix_mp.height, self->valign);
+			alloc_devs[0] = video->qdev->dev;
 			break;
 
 		case V4L2_PIX_FMT_NV12:
@@ -87,12 +90,15 @@ static int __queue_setup(struct vb2_queue *queue,
 				ALIGN(self->current_format.fmt.pix_mp.height, self->valign);
 			sizes[1] = ALIGN(self->current_format.fmt.pix_mp.width, self->halign) *
 				ALIGN(self->current_format.fmt.pix_mp.height, self->valign) / 2;
+			alloc_devs[0] = video->qdev->dev;
+			alloc_devs[1] = video->qdev->dev;
 			break;
 
 		case V4L2_PIX_FMT_M420:
 			*num_planes = 1;
 			sizes[0] = ALIGN(self->current_format.fmt.pix_mp.width, self->halign) *
 				ALIGN(self->current_format.fmt.pix_mp.height * 3 / 2, self->valign);
+			alloc_devs[0] = video->qdev->dev;
 			break;
 
 		default:
@@ -200,19 +206,18 @@ static int __buf_init(struct vb2_buffer *buffer) {
 	struct qvio_queue_buffer* buf = container_of(vbuf, struct qvio_queue_buffer, vb);
 	int plane_size;
 	void* vaddr;
+	dma_addr_t dma_addr;
 
 #if 1 // DEBUG
 	pr_info("param: %p %p %d %p\n", self, vbuf, vbuf->vb2_buf.index, buf);
 #endif
 
 	plane_size = vb2_plane_size(buffer, 0);
-	vaddr = vb2_plane_vaddr(buffer, 0);
-
-	pr_info("plane_size=%d, vaddr=%p\n", (int)plane_size, vaddr);
 
 	switch(buffer->memory) {
-#if 1
 	case V4L2_MEMORY_MMAP:
+		vaddr = vb2_plane_vaddr(buffer, 0);
+
 		buf->dma_dir = DMA_NONE;
 		err = vmalloc_dma_map_sg(video->qdev->dev, vaddr, plane_size, &buf->sgt, DMA_BIDIRECTIONAL);
 		if(err) {
@@ -222,11 +227,19 @@ static int __buf_init(struct vb2_buffer *buffer) {
 		buf->dma_dir = DMA_BIDIRECTIONAL;
 
 #if 1 // DEBUG
+		pr_info("plane_size=%d, vaddr=%p\n", (int)plane_size, vaddr);
 		sgt_dump(&buf->sgt);
 #endif
 
 		break;
+
+	case V4L2_MEMORY_DMABUF:
+		dma_addr = vb2_dma_contig_plane_dma_addr(buffer, 0);
+
+#if 1 // DEBUG
+		pr_info("plane_size=%d, dma_addr=%p\n", (int)plane_size, dma_addr);
 #endif
+		break;
 
 	default:
 		pr_err("unexpected value, buffer->memory=%d\n", (int)buffer->memory);
@@ -247,25 +260,35 @@ static void __buf_cleanup(struct vb2_buffer *buffer) {
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(buffer);
 	struct qvio_queue_buffer* buf = container_of(vbuf, struct qvio_queue_buffer, vb);
 	struct sg_table* sgt = &buf->sgt;
+	int err;
 
 #if 1 // DEBUG
 	pr_info("param: %p %p %d %p\n", self, vbuf, vbuf->vb2_buf.index, buf);
 #endif
 
-	// TODO: user-job dma-buf detach
-
-#if 1
+	switch(buffer->memory) {
+	case V4L2_MEMORY_MMAP:
 #if 1 // DEBUG
-	sgt_dump(sgt);
+		sgt_dump(sgt);
 #endif
 
-#if 1
-	dma_unmap_sg(video->qdev->dev, sgt->sgl, sgt->orig_nents, buf->dma_dir);
-#endif
-	sg_free_table(sgt);
-	buf->dma_dir = DMA_NONE;
-#endif
+		dma_unmap_sg(video->qdev->dev, sgt->sgl, sgt->orig_nents, buf->dma_dir);
+		sg_free_table(sgt);
+		buf->dma_dir = DMA_NONE;
+		break;
 
+	case V4L2_MEMORY_DMABUF:
+		break;
+
+	default:
+		pr_err("unexpected value, buffer->memory=%d\n", (int)buffer->memory);
+		goto err0;
+		break;
+	}
+
+	return;
+
+err0:
 	return;
 }
 
@@ -276,14 +299,17 @@ static int __buf_prepare(struct vb2_buffer *buffer) {
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(buffer);
 	struct qvio_queue_buffer* buf = container_of(vbuf, struct qvio_queue_buffer, vb);
 	int plane_size;
+	dma_addr_t dma_addr;
 
-#if 0 // DEBUG
+#if 1 // DEBUG
 	pr_info("param: %p %p %d %p\n", self, vbuf, vbuf->vb2_buf.index, buf);
 #endif
 
+	dma_addr = vb2_dma_contig_plane_dma_addr(buffer, 0);
+	pr_info("dma_addr=%p\n", dma_addr);
+
 	switch(self->current_format.type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
-	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
 		plane_size = vb2_plane_size(buffer, 0);
 		switch(self->current_format.fmt.pix.pixelformat) {
 		case V4L2_PIX_FMT_YUYV:
@@ -324,12 +350,9 @@ static int __buf_prepare(struct vb2_buffer *buffer) {
 			break;
 		}
 		vb2_set_plane_payload(buffer, 0, plane_size);
-		dma_sync_sg_for_device(video->qdev->dev, buf->sgt.sgl, buf->sgt.orig_nents, DMA_BIDIRECTIONAL);
-
 		break;
 
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
-	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		switch(self->current_format.fmt.pix_mp.pixelformat) {
 		case V4L2_PIX_FMT_YUYV:
 			plane_size = vb2_plane_size(buffer, 0);
@@ -397,6 +420,20 @@ static int __buf_prepare(struct vb2_buffer *buffer) {
 	if(vbuf->field == V4L2_FIELD_ANY)
 		vbuf->field = V4L2_FIELD_NONE;
 
+	switch(buffer->memory) {
+	case V4L2_MEMORY_MMAP:
+		dma_sync_sg_for_device(video->qdev->dev, buf->sgt.sgl, buf->sgt.orig_nents, DMA_BIDIRECTIONAL);
+		break;
+
+	case V4L2_MEMORY_DMABUF:
+		break;
+
+	default:
+		pr_err("unexpected value, buffer->memory=%d\n", (int)buffer->memory);
+		goto err0;
+		break;
+	}
+
 	return 0;
 
 err0:
@@ -410,11 +447,28 @@ static void __buf_finish(struct vb2_buffer *buffer) {
 	struct qvio_queue_buffer* buf = container_of(vbuf, struct qvio_queue_buffer, vb);
 	struct sg_table* sgt = &buf->sgt;
 
-#if 0 // DEBUG
+#if 1 // DEBUG
 	pr_info("param: %p %p %d %p\n", self, vbuf, vbuf->vb2_buf.index, buf);
 #endif
 
-	dma_sync_sg_for_cpu(video->qdev->dev, sgt->sgl, sgt->orig_nents, DMA_BIDIRECTIONAL);
+	switch(buffer->memory) {
+	case V4L2_MEMORY_MMAP:
+		dma_sync_sg_for_cpu(video->qdev->dev, sgt->sgl, sgt->orig_nents, DMA_BIDIRECTIONAL);
+		break;
+
+	case V4L2_MEMORY_DMABUF:
+		break;
+
+	default:
+		pr_err("unexpected value, buffer->memory=%d\n", (int)buffer->memory);
+		goto err0;
+		break;
+	}
+
+	return;
+
+err0:
+	return;
 }
 
 static void __buf_queue(struct vb2_buffer *buffer) {
@@ -500,7 +554,7 @@ int qvio_queue_start(struct qvio_queue* self, enum v4l2_buf_type type) {
 	self->queue.drv_priv = self;
 	self->queue.lock = &self->queue_mutex;
 	self->queue.buf_struct_size = sizeof(struct qvio_queue_buffer);
-	self->queue.mem_ops = &vb2_vmalloc_memops;
+	self->queue.mem_ops = &vb2_dma_contig_memops;
 	self->queue.ops = &qvio_vb2_ops;
 	self->queue.timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	self->queue.min_buffers_needed = 2;

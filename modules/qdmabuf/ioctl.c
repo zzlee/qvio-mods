@@ -13,9 +13,12 @@ static void sgt_dump(struct sg_table *sgt)
 {
 	int i;
 	struct scatterlist *sg = sgt->sgl;
+	dma_addr_t dma_addr;
 
-	pr_info("sgt 0x%p, sgl 0x%p, nents %u/%u.\n", sgt, sgt->sgl, sgt->nents,
-		sgt->orig_nents);
+	dma_addr = sg_dma_address(sg);
+
+	pr_info("sgt 0x%p, sgl 0x%p, nents %u/%u, dma_addr=%p.\n", sgt, sgt->sgl, sgt->nents,
+		sgt->orig_nents, dma_addr);
 
 	for (i = 0; i < sgt->orig_nents; i++, sg = sg_next(sg)) {
 		if(i > 8) {
@@ -140,8 +143,24 @@ long qdmabuf_ioctl_info(struct qdmabuf_device* device, unsigned long arg) {
 
 	sgt_dump(sgt);
 
-	ret = 0;
+	args.size = dmabuf->size;
+	args.phy_addr = sg_dma_address(sgt->sgl);
 
+	if (copy_to_user((void *)arg, &args, sizeof(args))) {
+		pr_err("copy_to_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err4;
+	}
+
+	dma_buf_unmap_attachment(attach, sgt, DMA_FROM_DEVICE);
+	dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
+	dma_buf_detach(dmabuf, attach);
+	dma_buf_put(dmabuf);
+
+	return 0;
+
+err4:
 	dma_buf_unmap_attachment(attach, sgt, DMA_FROM_DEVICE);
 err3:
 	dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);

@@ -2,8 +2,8 @@
 #define __QVIO_VIDEO_H__
 
 #include "queue.h"
-#include "user_job.h"
 #include "device.h"
+#include "umods.h"
 
 #include <media/v4l2-device.h>
 #include <linux/videodev2.h>
@@ -28,11 +28,7 @@ struct qvio_video {
 	unsigned int current_inout;
 	struct v4l2_streamparm current_parm;
 
-	// user job
-	struct qvio_user_job_ctrl user_job_ctrl;
-
-	// xdma
-	int channel;
+	struct qvio_umods umods;
 };
 
 struct qvio_video* qvio_video_new(void);

@@ -6,7 +6,7 @@
 #include <linux/platform_device.h>
 #include <media/v4l2-device.h>
 
-#define DRV_MODULE_NAME "qvio"
+#define DRV_MODULE_NAME "qvio-l4t"
 
 static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg);
 static int __probe(struct platform_device *pdev);
@@ -18,15 +18,20 @@ static struct file_operations __fops = {
 	.unlocked_ioctl = __file_ioctl,
 };
 
+static const struct of_device_id __camera_of_ids[] = {
+	{ .compatible = "yuan,qvio-l4t" },
+	{ },
+};
+
 static struct platform_driver __driver = {
 	.driver = {
-		.name = DRV_MODULE_NAME
+		.owner = THIS_MODULE,
+		.name = DRV_MODULE_NAME,
+		.of_match_table = __camera_of_ids
 	},
 	.probe  = __probe,
 	.remove = __remove,
 };
-
-static struct platform_device *pdev_qvio;
 
 static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg) {
 	long ret;
@@ -77,7 +82,6 @@ static int __probe(struct platform_device *pdev) {
 	}
 
 	self->video[0]->qdev = self;
-	self->video[0]->user_job_ctrl.enable = true;
 
 	self->video[0]->vfl_dir = VFL_DIR_RX;
 	self->video[0]->buffer_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -128,26 +132,8 @@ int qvio_device_platform_register(void) {
 		goto err0;
 	}
 
-	pdev_qvio = platform_device_alloc(DRV_MODULE_NAME, 0);
-	if (pdev_qvio == NULL) {
-		pr_err("platform_device_alloc() failed\n");
-		err = -ENOMEM;
-		goto err1;
-	}
-
-	err = platform_device_add(pdev_qvio);
-	if (err != 0) {
-		pr_err("platform_device_add() failed, err=%d\n", err);
-		err = -ENOMEM;
-		goto err2;
-	}
-
 	return 0;
 
-err2:
-	platform_device_put(pdev_qvio);
-err1:
-	platform_driver_unregister(&__driver);
 err0:
 	return err;
 }
@@ -155,7 +141,5 @@ err0:
 void qvio_device_platform_unregister(void) {
 	pr_info("\n");
 
-	platform_device_del(pdev_qvio);
-	platform_device_put(pdev_qvio);
 	platform_driver_unregister(&__driver);
 }
