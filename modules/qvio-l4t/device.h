@@ -15,9 +15,15 @@ struct qvio_device {
 
 	struct device *dev;
 	struct platform_device *pdev;
+
+	// PCIs device
 	struct pci_dev *pci_dev;
 	uint32_t device_id;
+	void __iomem *bar[6];
+	int regions_in_use;
+	int got_regions;
 
+	// Char device
 	struct qvio_cdev cdev;
 
 	struct qvio_video* video[QVIO_MAX_VIDEO];

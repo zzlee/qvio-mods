@@ -7,18 +7,9 @@
 #include <media/videobuf2-v4l2.h>
 #include <media/videobuf2-dma-contig.h>
 
-struct qvio_queue_buffer {
+struct __queue_buffer {
 	struct vb2_v4l2_buffer vb;
 	struct list_head list_ready;
-
-	// user-job buf-init
-	struct {
-		int flags;
-		int dma_buf;
-		int offset[4];
-		int pitch[4];
-		int psize[4];
-	} buf_init;
 
 	// vb2_buffer dma access
 	struct sg_table sgt;
@@ -39,6 +30,8 @@ static int __queue_setup(struct vb2_queue *queue,
 	int err = 0;
 	struct qvio_queue* self = container_of(queue, struct qvio_queue, queue);
 	struct qvio_video* video = container_of(self, struct qvio_video, queue);
+	struct qvio_umods_req_entry* req_entry;
+	int i;
 
 	pr_info("+param %d %d\n", *num_buffers, *num_planes);
 
@@ -118,8 +111,23 @@ static int __queue_setup(struct vb2_queue *queue,
 
 	pr_info("-param %d %d [%d %d]\n", *num_buffers, *num_planes, sizes[0], sizes[1]);
 
+	err = qvio_umods_req_entry_new(&req_entry);
+	if(err) {
+		pr_err("qvio_umods_req_entry_new() failed err=%d", err);
+		goto err0;
+	}
+
+	req_entry->req.job_id = QVIO_UMODS_JOB_ID_QUEUE_SETUP;
+	req_entry->req.u.queue_setup.num_buffers = *num_buffers;
+	req_entry->req.u.queue_setup.num_planes = *num_planes;
+	for(i = 0;i < (int)*num_planes;i++)
+		req_entry->req.u.queue_setup.sizes[i] = sizes[i];
+	qvio_umods_request(&video->umods, req_entry);
+
 	return 0;
 
+err1:
+	kfree(req_entry);
 err0:
 	return err;
 }
@@ -203,7 +211,8 @@ static int __buf_init(struct vb2_buffer *buffer) {
 	struct qvio_queue* self = vb2_get_drv_priv(buffer->vb2_queue);
 	struct qvio_video* video = container_of(self, struct qvio_video, queue);
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(buffer);
-	struct qvio_queue_buffer* buf = container_of(vbuf, struct qvio_queue_buffer, vb);
+	struct __queue_buffer* buf = container_of(vbuf, struct __queue_buffer, vb);
+	struct qvio_umods_req_entry* req_entry;
 	int plane_size;
 	void* vaddr;
 	dma_addr_t dma_addr;
@@ -237,7 +246,7 @@ static int __buf_init(struct vb2_buffer *buffer) {
 		dma_addr = vb2_dma_contig_plane_dma_addr(buffer, 0);
 
 #if 1 // DEBUG
-		pr_info("plane_size=%d, dma_addr=%p\n", (int)plane_size, dma_addr);
+		pr_info("plane_size=%d, dma_addr=0x%llx\n", (int)plane_size, dma_addr);
 #endif
 		break;
 
@@ -248,6 +257,16 @@ static int __buf_init(struct vb2_buffer *buffer) {
 		break;
 	}
 
+	err = qvio_umods_req_entry_new(&req_entry);
+	if(err) {
+		pr_err("qvio_umods_req_entry_new() failed err=%d", err);
+		goto err0;
+	}
+
+	req_entry->req.job_id = QVIO_UMODS_JOB_ID_BUF_INIT;
+	req_entry->req.u.buf_init.flags = 0x1234;
+	qvio_umods_request(&video->umods, req_entry);
+
 	return 0;
 
 err0:
@@ -255,12 +274,13 @@ err0:
 }
 
 static void __buf_cleanup(struct vb2_buffer *buffer) {
+	int err;
 	struct qvio_queue* self = vb2_get_drv_priv(buffer->vb2_queue);
 	struct qvio_video* video = container_of(self, struct qvio_video, queue);
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(buffer);
-	struct qvio_queue_buffer* buf = container_of(vbuf, struct qvio_queue_buffer, vb);
+	struct __queue_buffer* buf = container_of(vbuf, struct __queue_buffer, vb);
 	struct sg_table* sgt = &buf->sgt;
-	int err;
+	struct qvio_umods_req_entry* req_entry;
 
 #if 1 // DEBUG
 	pr_info("param: %p %p %d %p\n", self, vbuf, vbuf->vb2_buf.index, buf);
@@ -286,6 +306,16 @@ static void __buf_cleanup(struct vb2_buffer *buffer) {
 		break;
 	}
 
+	err = qvio_umods_req_entry_new(&req_entry);
+	if(err) {
+		pr_err("qvio_umods_req_entry_new() failed err=%d", err);
+		goto err0;
+	}
+
+	req_entry->req.job_id = QVIO_UMODS_JOB_ID_BUF_CLEANUP;
+	req_entry->req.u.buf_cleanup.flags = 0x1234;
+	qvio_umods_request(&video->umods, req_entry);
+
 	return;
 
 err0:
@@ -297,16 +327,17 @@ static int __buf_prepare(struct vb2_buffer *buffer) {
 	struct qvio_queue* self = vb2_get_drv_priv(buffer->vb2_queue);
 	struct qvio_video* video = container_of(self, struct qvio_video, queue);
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(buffer);
-	struct qvio_queue_buffer* buf = container_of(vbuf, struct qvio_queue_buffer, vb);
+	struct __queue_buffer* buf = container_of(vbuf, struct __queue_buffer, vb);
 	int plane_size;
 	dma_addr_t dma_addr;
+	struct qvio_umods_req_entry* req_entry;
 
 #if 1 // DEBUG
 	pr_info("param: %p %p %d %p\n", self, vbuf, vbuf->vb2_buf.index, buf);
 #endif
 
 	dma_addr = vb2_dma_contig_plane_dma_addr(buffer, 0);
-	pr_info("dma_addr=%p\n", dma_addr);
+	pr_info("dma_addr=0x%llx\n", dma_addr);
 
 	switch(self->current_format.type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
@@ -434,6 +465,16 @@ static int __buf_prepare(struct vb2_buffer *buffer) {
 		break;
 	}
 
+	err = qvio_umods_req_entry_new(&req_entry);
+	if(err) {
+		pr_err("qvio_umods_req_entry_new() failed err=%d", err);
+		goto err0;
+	}
+
+	req_entry->req.job_id = QVIO_UMODS_JOB_ID_BUF_PREPARE;
+	req_entry->req.u.buf_prepare.flags = 0x1234;
+	qvio_umods_request(&video->umods, req_entry);
+
 	return 0;
 
 err0:
@@ -441,11 +482,13 @@ err0:
 }
 
 static void __buf_finish(struct vb2_buffer *buffer) {
+	int err;
 	struct qvio_queue* self = vb2_get_drv_priv(buffer->vb2_queue);
 	struct qvio_video* video = container_of(self, struct qvio_video, queue);
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(buffer);
-	struct qvio_queue_buffer* buf = container_of(vbuf, struct qvio_queue_buffer, vb);
+	struct __queue_buffer* buf = container_of(vbuf, struct __queue_buffer, vb);
 	struct sg_table* sgt = &buf->sgt;
+	struct qvio_umods_req_entry* req_entry;
 
 #if 1 // DEBUG
 	pr_info("param: %p %p %d %p\n", self, vbuf, vbuf->vb2_buf.index, buf);
@@ -465,6 +508,16 @@ static void __buf_finish(struct vb2_buffer *buffer) {
 		break;
 	}
 
+	err = qvio_umods_req_entry_new(&req_entry);
+	if(err) {
+		pr_err("qvio_umods_req_entry_new() failed err=%d", err);
+		goto err0;
+	}
+
+	req_entry->req.job_id = QVIO_UMODS_JOB_ID_BUF_FINISH;
+	req_entry->req.u.buf_finish.flags = 0x1234;
+	qvio_umods_request(&video->umods, req_entry);
+
 	return;
 
 err0:
@@ -472,9 +525,12 @@ err0:
 }
 
 static void __buf_queue(struct vb2_buffer *buffer) {
+	int err;
 	struct qvio_queue* self = vb2_get_drv_priv(buffer->vb2_queue);
+	struct qvio_video* video = container_of(self, struct qvio_video, queue);
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(buffer);
-	struct qvio_queue_buffer* buf = container_of(vbuf, struct qvio_queue_buffer, vb);
+	struct __queue_buffer* buf = container_of(vbuf, struct __queue_buffer, vb);
+	struct qvio_umods_req_entry* req_entry;
 
 #if 0 // DEBUG
 	pr_info("param: %p %p %d %p\n", self, vbuf, vbuf->vb2_buf.index, buf);
@@ -484,6 +540,21 @@ static void __buf_queue(struct vb2_buffer *buffer) {
 		list_add_tail(&buf->list_ready, &self->buffers);
 		mutex_unlock(&self->buffers_mutex);
 	}
+
+	err = qvio_umods_req_entry_new(&req_entry);
+	if(err) {
+		pr_err("qvio_umods_req_entry_new() failed err=%d", err);
+		goto err0;
+	}
+
+	req_entry->req.job_id = QVIO_UMODS_JOB_ID_BUF_QUEUE;
+	req_entry->req.u.buf_queue.flags = 0x1234;
+	qvio_umods_request(&video->umods, req_entry);
+
+	return;
+
+err0:
+	return;
 }
 
 static int __start_streaming(struct vb2_queue *queue, unsigned int count) {
@@ -491,12 +562,23 @@ static int __start_streaming(struct vb2_queue *queue, unsigned int count) {
 	struct qvio_queue* self = container_of(queue, struct qvio_queue, queue);
 	struct qvio_video* video = container_of(self, struct qvio_video, queue);
 	struct qvio_device* qdev = video->qdev;
-	struct qvio_queue_buffer* buf;
+	struct __queue_buffer* buf;
+	struct qvio_umods_req_entry* req_entry;
 	ssize_t size;
 
-	pr_info("\n");
+	pr_info("count=%d\n", count);
 
 	self->sequence = 0;
+
+	err = qvio_umods_req_entry_new(&req_entry);
+	if(err) {
+		pr_err("qvio_umods_req_entry_new() failed err=%d", err);
+		goto err0;
+	}
+
+	req_entry->req.job_id = QVIO_UMODS_JOB_ID_START_STREAMING;
+	req_entry->req.u.buf_finish.flags = 0x1234;
+	qvio_umods_request(&video->umods, req_entry);
 
 	return 0;
 
@@ -505,15 +587,17 @@ err0:
 }
 
 static void __stop_streaming(struct vb2_queue *queue) {
+	int err;
 	struct qvio_queue* self = container_of(queue, struct qvio_queue, queue);
 	struct qvio_video* video = container_of(self, struct qvio_video, queue);
 	struct qvio_device* qdev = video->qdev;
+	struct qvio_umods_req_entry* req_entry;
 
 	pr_info("\n");
 
 	if (!mutex_lock_interruptible(&self->buffers_mutex)) {
-		struct qvio_queue_buffer* buf;
-		struct qvio_queue_buffer* node;
+		struct __queue_buffer* buf;
+		struct __queue_buffer* node;
 
 		list_for_each_entry_safe(buf, node, &self->buffers, list_ready) {
 #if 1 // DEBUG
@@ -526,6 +610,21 @@ static void __stop_streaming(struct vb2_queue *queue) {
 
 		mutex_unlock(&self->buffers_mutex);
 	}
+
+	err = qvio_umods_req_entry_new(&req_entry);
+	if(err) {
+		pr_err("qvio_umods_req_entry_new() failed err=%d", err);
+		goto err0;
+	}
+
+	req_entry->req.job_id = QVIO_UMODS_JOB_ID_STOP_STREAMING;
+	req_entry->req.u.buf_finish.flags = 0x1234;
+	qvio_umods_request(&video->umods, req_entry);
+
+	return;
+
+err0:
+	return;
 }
 
 static const struct vb2_ops qvio_vb2_ops = {
@@ -553,7 +652,7 @@ int qvio_queue_start(struct qvio_queue* self, enum v4l2_buf_type type) {
 	self->queue.io_modes |= VB2_MMAP | VB2_USERPTR | VB2_DMABUF;
 	self->queue.drv_priv = self;
 	self->queue.lock = &self->queue_mutex;
-	self->queue.buf_struct_size = sizeof(struct qvio_queue_buffer);
+	self->queue.buf_struct_size = sizeof(struct __queue_buffer);
 	self->queue.mem_ops = &vb2_dma_contig_memops;
 	self->queue.ops = &qvio_vb2_ops;
 	self->queue.timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
@@ -571,11 +670,28 @@ struct vb2_queue* qvio_queue_get_vb2_queue(struct qvio_queue* self) {
 }
 
 int qvio_queue_s_fmt(struct qvio_queue* self, struct v4l2_format *format) {
+	int err;
+	struct qvio_video* video = container_of(self, struct qvio_video, queue);
+	struct qvio_umods_req_entry* req_entry;
+
 	pr_info("\n");
 
 	memcpy(&self->current_format, format, sizeof(struct v4l2_format));
 
+	err = qvio_umods_req_entry_new(&req_entry);
+	if(err) {
+		pr_err("qvio_umods_req_entry_new() failed err=%d", err);
+		goto err0;
+	}
+
+	req_entry->req.job_id = QVIO_UMODS_JOB_ID_S_FMT;
+	memcpy(&req_entry->req.u.s_fmt.format, format, sizeof(struct v4l2_format));
+	qvio_umods_request(&video->umods, req_entry);
+
 	return 0;
+
+err0:
+	return err;
 }
 
 int qvio_queue_g_fmt(struct qvio_queue* self, struct v4l2_format *format) {
@@ -587,7 +703,33 @@ int qvio_queue_g_fmt(struct qvio_queue* self, struct v4l2_format *format) {
 }
 
 int qvio_queue_try_buf_done(struct qvio_queue* self) {
+	int err;
+	struct __queue_buffer* buf;
+
 	pr_info("\n");
 
+	err = mutex_lock_interruptible(&self->buffers_mutex);
+	if (err) {
+		pr_err("mutex_lock_interruptible() failed, err=%d\n", err);
+
+		goto err0;
+	}
+
+	if (list_empty(&self->buffers)) {
+		mutex_unlock(&self->buffers_mutex);
+		pr_err("unexpected, list_empty()\n");
+
+		goto err0;
+	}
+
+	buf = list_entry(self->buffers.next, struct __queue_buffer, list_ready);
+	list_del(&buf->list_ready);
+	mutex_unlock(&self->buffers_mutex);
+
+	vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+
 	return 0;
+
+err0:
+	return err;
 }

@@ -1,6 +1,8 @@
 #define pr_fmt(fmt)     "[" KBUILD_MODNAME "]%s(#%d): " fmt, __func__, __LINE__
 
 #include "video.h"
+#include "umods.h"
+#include "uapi/qvio-l4t.h"
 
 #include <linux/kernel.h>
 #include <linux/version.h>
@@ -26,6 +28,10 @@ static int __ioctl_s_parm(struct file *file, void *fh, struct v4l2_streamparm *p
 static int __ioctl_enum_framesizes(struct file *file, void *fh, struct v4l2_frmsizeenum *frame_sizes);
 static int __ioctl_enum_frameintervals(struct file *file, void *fh, struct v4l2_frmivalenum *frame_intervals);
 static long __ioctl_default(struct file *file, void *fh, bool valid_prio, unsigned int cmd, void *arg);
+
+// file ioctl handlers
+static long __ioctl_g_umods_fd(struct file *file, void *fh, bool valid_prio, unsigned int cmd, void *arg);
+static long __ioctl_buf_done(struct file *file, void *fh, bool valid_prio, unsigned int cmd, void *arg);
 
 static const struct v4l2_file_operations __video_fops = {
 	.owner          = THIS_MODULE    ,
@@ -224,6 +230,8 @@ int qvio_video_start(struct qvio_video* self) {
 		goto err3;
 	}
 
+	qvio_umods_start(&self->umods);
+
 	return 0;
 
 err3:
@@ -239,6 +247,7 @@ err0:
 void qvio_video_stop(struct qvio_video* self) {
 	pr_info("\n");
 
+	qvio_umods_stop(&self->umods);
 	video_unregister_device(self->vdev);
 	video_device_release(self->vdev);
 	qvio_queue_stop(&self->queue);
@@ -341,7 +350,7 @@ static int __ioctl_querycap(struct file *file, void *fh, struct v4l2_capability 
 	capability->version = LINUX_VERSION_CODE;
 	snprintf(capability->driver, sizeof(capability->driver), "qvio");
 	snprintf(capability->card, sizeof(capability->card), "qvio");
-	strlcpy(capability->bus_info, self->bus_info, sizeof(capability->bus_info));
+	strscpy(capability->bus_info, self->bus_info, sizeof(capability->bus_info));
 	capability->capabilities = self->device_caps | V4L2_CAP_DEVICE_CAPS;
 	capability->device_caps = self->device_caps;
 
@@ -856,33 +865,65 @@ err0:
 
 static long __ioctl_default(struct file *file, void *fh, bool valid_prio, unsigned int cmd, void *arg) {
 	long ret;
-	struct qvio_video* self = video_drvdata(file);
 
 #if 0
 	pr_info("valid_prio=%d cmd=%d arg=%p\n", valid_prio, cmd, arg);
 #endif
 
 	switch(cmd) {
-#if 0
-	case QVID_IOC_USER_JOB_FD: {
-		int* pFd = (int*)arg;
-
-		*pFd = __anon_fd("qvio-user-job", self->user_job_ctrl.ctrl_fops, &self->user_job_ctrl, O_RDONLY | O_CLOEXEC);
-		ret = 0;
-
-		pr_info("fd=%d\n", *pFd);
-	}
+	case QVID_IOC_G_UMODS_FD:
+		ret = __ioctl_g_umods_fd(file, fh, valid_prio, cmd, arg);
 		break;
 
 	case QVID_IOC_BUF_DONE:
-		ret = qvio_video_buf_done(self);
+		ret = __ioctl_buf_done(file, fh, valid_prio, cmd, arg);
 		break;
-#endif
 
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
 	}
 
+	return ret;
+}
+
+static long __ioctl_g_umods_fd(struct file *file, void *fh, bool valid_prio, unsigned int cmd, void *arg) {
+	long ret;
+	int err;
+	struct qvio_video* self = video_drvdata(file);
+	struct qvio_umods_fd* umods_fd = (struct qvio_umods_fd*)arg;
+
+	err = qvio_umods_get_fd(&self->umods, "qvio-umods", umods_fd->flags);
+	if (err < 0) {
+		pr_err("qvio_umods_get_fd() failed, err=%d\n", err);
+
+		ret = -err;
+		goto err0;
+	}
+
+	umods_fd->fd = err;
+	pr_info("umods_fd->fd=%d\n", umods_fd->fd);
+
+	return 0;
+
+err0:
+	return ret;
+}
+
+static long __ioctl_buf_done(struct file *file, void *fh, bool valid_prio, unsigned int cmd, void *arg) {
+	long ret;
+	int err;
+	struct qvio_video* self = video_drvdata(file);
+
+	err = qvio_queue_try_buf_done(&self->queue);
+	if(err) {
+		pr_err("qvio_queue_try_buf_done() failed, err=%d\n", err);
+		ret = -err;
+		goto err0;
+	}
+
+	return 0;
+
+err0:
 	return ret;
 }

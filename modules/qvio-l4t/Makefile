@@ -11,7 +11,8 @@ qvio-objs := \
 	cdev.o \
 	video.o \
 	umods.o \
-	platform_device.o
+	platform_device.o \
+	pci_device.o
 
 ccflags-y += \
 -O3 \

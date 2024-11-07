@@ -6,6 +6,7 @@
 #include "version.h"
 #include "cdev.h"
 #include "platform_device.h"
+#include "pci_device.h"
 
 #define DRV_MODULE_DESC		"QCAP Video I/O Driver"
 
@@ -34,8 +35,16 @@ static int __init qvio_mod_init(void)
 		goto err1;
 	}
 
+	err = qvio_device_pci_register();
+	if (err != 0) {
+		pr_err("qvio_device_platform_register() failed, err=%d\n", err);
+		goto err2;
+	}
+
 	return 0;
 
+err2:
+	qvio_device_platform_unregister();
 err1:
 	qvio_cdev_unregister();
 err0:
@@ -46,6 +55,7 @@ static void __exit qvio_mod_exit(void)
 {
 	pr_info("%s\n", version);
 
+	qvio_device_pci_unregister();
 	qvio_device_platform_unregister();
 	qvio_cdev_unregister();
 }
