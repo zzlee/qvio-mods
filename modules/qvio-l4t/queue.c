@@ -264,7 +264,10 @@ static int __buf_init(struct vb2_buffer *buffer) {
 	}
 
 	req_entry->req.job_id = QVIO_UMODS_JOB_ID_BUF_INIT;
-	req_entry->req.u.buf_init.flags = 0x1234;
+	req_entry->req.u.buf_init.index = buffer->index;
+	req_entry->req.u.buf_init.type = buffer->type;
+	req_entry->req.u.buf_init.memory = buffer->memory;
+	req_entry->req.u.buf_init.timestamp = buffer->timestamp;
 	qvio_umods_request(&video->umods, req_entry);
 
 	return 0;
@@ -313,7 +316,10 @@ static void __buf_cleanup(struct vb2_buffer *buffer) {
 	}
 
 	req_entry->req.job_id = QVIO_UMODS_JOB_ID_BUF_CLEANUP;
-	req_entry->req.u.buf_cleanup.flags = 0x1234;
+	req_entry->req.u.buf_cleanup.index = buffer->index;
+	req_entry->req.u.buf_cleanup.type = buffer->type;
+	req_entry->req.u.buf_cleanup.memory = buffer->memory;
+	req_entry->req.u.buf_cleanup.timestamp = buffer->timestamp;
 	qvio_umods_request(&video->umods, req_entry);
 
 	return;
@@ -472,7 +478,10 @@ static int __buf_prepare(struct vb2_buffer *buffer) {
 	}
 
 	req_entry->req.job_id = QVIO_UMODS_JOB_ID_BUF_PREPARE;
-	req_entry->req.u.buf_prepare.flags = 0x1234;
+	req_entry->req.u.buf_prepare.index = buffer->index;
+	req_entry->req.u.buf_prepare.type = buffer->type;
+	req_entry->req.u.buf_prepare.memory = buffer->memory;
+	req_entry->req.u.buf_prepare.timestamp = buffer->timestamp;
 	qvio_umods_request(&video->umods, req_entry);
 
 	return 0;
@@ -515,7 +524,10 @@ static void __buf_finish(struct vb2_buffer *buffer) {
 	}
 
 	req_entry->req.job_id = QVIO_UMODS_JOB_ID_BUF_FINISH;
-	req_entry->req.u.buf_finish.flags = 0x1234;
+	req_entry->req.u.buf_finish.index = buffer->index;
+	req_entry->req.u.buf_finish.type = buffer->type;
+	req_entry->req.u.buf_finish.memory = buffer->memory;
+	req_entry->req.u.buf_finish.timestamp = buffer->timestamp;
 	qvio_umods_request(&video->umods, req_entry);
 
 	return;
@@ -548,7 +560,10 @@ static void __buf_queue(struct vb2_buffer *buffer) {
 	}
 
 	req_entry->req.job_id = QVIO_UMODS_JOB_ID_BUF_QUEUE;
-	req_entry->req.u.buf_queue.flags = 0x1234;
+	req_entry->req.u.buf_queue.index = buffer->index;
+	req_entry->req.u.buf_queue.type = buffer->type;
+	req_entry->req.u.buf_queue.memory = buffer->memory;
+	req_entry->req.u.buf_queue.timestamp = buffer->timestamp;
 	qvio_umods_request(&video->umods, req_entry);
 
 	return;
@@ -577,7 +592,7 @@ static int __start_streaming(struct vb2_queue *queue, unsigned int count) {
 	}
 
 	req_entry->req.job_id = QVIO_UMODS_JOB_ID_START_STREAMING;
-	req_entry->req.u.buf_finish.flags = 0x1234;
+	req_entry->req.u.start_streaming.count = count;
 	qvio_umods_request(&video->umods, req_entry);
 
 	return 0;
@@ -618,7 +633,7 @@ static void __stop_streaming(struct vb2_queue *queue) {
 	}
 
 	req_entry->req.job_id = QVIO_UMODS_JOB_ID_STOP_STREAMING;
-	req_entry->req.u.buf_finish.flags = 0x1234;
+	req_entry->req.u.stop_streaming.flags = 0;
 	qvio_umods_request(&video->umods, req_entry);
 
 	return;

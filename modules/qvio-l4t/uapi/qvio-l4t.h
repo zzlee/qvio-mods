@@ -41,27 +41,42 @@ struct qvio_umods_req {
 		} queue_setup;
 
 		struct {
-			int flags;
+			unsigned int index;
+			unsigned int type;
+			unsigned int memory;
+			__u64 timestamp;
 		} buf_init;
 
 		struct {
-			int flags;
+			unsigned int index;
+			unsigned int type;
+			unsigned int memory;
+			__u64 timestamp;
 		} buf_prepare;
 
 		struct {
-			int flags;
+			unsigned int index;
+			unsigned int type;
+			unsigned int memory;
+			__u64 timestamp;
 		} buf_queue;
 
 		struct {
-			int flags;
+			unsigned int index;
+			unsigned int type;
+			unsigned int memory;
+			__u64 timestamp;
 		} buf_finish;
 
 		struct {
-			int flags;
+			unsigned int index;
+			unsigned int type;
+			unsigned int memory;
+			__u64 timestamp;
 		} buf_cleanup;
 
 		struct {
-			int flags;
+			unsigned int count;
 		} start_streaming;
 
 		struct {
@@ -128,6 +143,5 @@ struct qvio_umods_rsp_req {
 // UMODS_FD ioctls
 #define QVID_IOC_G_UMODS_REQ		_IOWR(QVID_IOC_MAGIC, 1, struct qvio_umods_req)
 #define QVID_IOC_S_UMODS_RSP		_IOWR(QVID_IOC_MAGIC, 2, struct qvio_umods_rsp)
-#define QVID_IOC_S_UMODS_RSP_REQ	_IOWR(QVID_IOC_MAGIC, 3, struct qvio_umods_rsp_req)
 
 #endif /* _UAPI_LINUX_QVIO_L4T_H */
