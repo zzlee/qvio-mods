@@ -4,6 +4,7 @@
 #include "device.h"
 
 #include <linux/version.h>
+#include <linux/module.h>
 #include <linux/aer.h>
 #include <linux/pci.h>
 
@@ -14,6 +15,16 @@ static const struct pci_device_id __pci_ids[] = {
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, __pci_ids);
+
+ssize_t qvio_dev_instance_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct qvio_device* self = dev_get_drvdata(dev);
+	__u32* val = self->dma_block0.cpu_addr;
+
+	return snprintf(buf, PAGE_SIZE, "val=%u %u %u %u\n", val[0], val[1], val[2], val[3]);
+}
+
+static DEVICE_ATTR_RO(qvio_dev_instance);
 
 static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg) {
 	long ret;
@@ -281,8 +292,32 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 		goto err2;
 	}
 
+#if 1
+	self->dma_block0.size = 4096;
+	self->dma_block0.gfp = GFP_KERNEL | GFP_DMA;
+	self->dma_block0.cpu_addr = dma_alloc_coherent(&pdev->dev, self->dma_block0.size,
+		&self->dma_block0.dma_handle, self->dma_block0.gfp);
+	if(err) {
+		pr_err("dma_alloc_coherent() failed, err=%d\n", err);
+		goto err3;
+	}
+
+	pr_info("DMA: size=%d cpu_addr=%llx dma_handle=%llx", (int)self->dma_block0.size,
+		(u64)self->dma_block0.cpu_addr, (u64)self->dma_block0.dma_handle);
+#endif
+
+	err = device_create_file(&pdev->dev, &dev_attr_qvio_dev_instance);
+	if (err) {
+		pr_err("device_create_file() failed, err=%d\n", err);
+		goto err4;
+	}
+
 	return 0;
 
+err4:
+	dma_free_coherent(&pdev->dev, self->dma_block0.size, self->dma_block0.cpu_addr, self->dma_block0.dma_handle);
+err3:
+	qvio_cdev_stop(&self->cdev);
 err2:
 	unmap_bars(self);
 err1:
@@ -298,6 +333,12 @@ static void __pci_remove(struct pci_dev *pdev) {
 
 	if (! self)
 		return;
+
+	device_remove_file(&pdev->dev, &dev_attr_qvio_dev_instance);
+
+#if 1
+	dma_free_coherent(&pdev->dev, self->dma_block0.size, self->dma_block0.cpu_addr, self->dma_block0.dma_handle);
+#endif
 
 	qvio_cdev_stop(&self->cdev);
 	unmap_bars(self);

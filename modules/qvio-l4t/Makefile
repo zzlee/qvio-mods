@@ -6,13 +6,16 @@ KARGS ?=
 obj-m += qvio.o
 qvio-objs := \
 	module.o \
-	queue.o \
 	device.o \
 	cdev.o \
+	umods.o
+
+qvio-objs += \
 	video.o \
-	umods.o \
-	platform_device.o \
-	pci_device.o
+	queue.o
+
+qvio-objs += pci_device.o
+qvio-objs += platform_device.o
 
 ccflags-y += \
 -O3 \

@@ -10,6 +10,13 @@
 
 #define QVIO_MAX_VIDEO 1
 
+struct dma_block_t {
+	size_t size;
+	void *cpu_addr;
+	dma_addr_t dma_handle;
+	gfp_t gfp;
+};
+
 struct qvio_device {
 	struct kref ref;
 
@@ -22,6 +29,9 @@ struct qvio_device {
 	void __iomem *bar[6];
 	int regions_in_use;
 	int got_regions;
+
+	// DMA block for test
+	struct dma_block_t dma_block0;
 
 	// Char device
 	struct qvio_cdev cdev;
