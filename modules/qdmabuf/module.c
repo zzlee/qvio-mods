@@ -1,5 +1,7 @@
 #define pr_fmt(fmt)     "[" KBUILD_MODNAME "]%s(#%d): " fmt, __func__, __LINE__
 
+#include "config.h"
+
 #include <linux/version.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -23,15 +25,15 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_IMPORT_NS(DMA_BUF);
 #endif
 
-#ifdef CONFIG_OF
+#if Z_CONFIG_OF
 struct of_device_id qdmabuf_of_match[] = {
 	{ .compatible = "yuan,qdmabuf", },
 	{ /* end of list */ },
 };
 MODULE_DEVICE_TABLE(of, qdmabuf_of_match);
-#else // CONFIG_OF
+#else // Z_CONFIG_OF
 static struct platform_device *pdev_qdmabuf;
-#endif // CONFIG_OF
+#endif // Z_CONFIG_OF
 
 static int __init qdmabuf_mod_init(void)
 {
@@ -45,7 +47,7 @@ static int __init qdmabuf_mod_init(void)
 		goto err0;
 	}
 
-#ifndef CONFIG_OF
+#if ! Z_CONFIG_OF
 	pdev_qdmabuf = platform_device_alloc(QDMABUF_DRIVER_NAME, 0);
 	if (pdev_qdmabuf == NULL) {
 		pr_err("platform_device_alloc() failed\n");
@@ -59,16 +61,16 @@ static int __init qdmabuf_mod_init(void)
 		err = -ENOMEM;
 		goto err2;
 	}
-#endif // CONFIG_OF
+#endif // ! Z_CONFIG_OF
 
 	return err;
 
-#ifndef CONFIG_OF
+#if ! Z_CONFIG_OF
 err2:
 	platform_device_put(pdev_qdmabuf);
 err1:
 	qdmabuf_device_unregister();
-#endif // CONFIG_OF
+#endif // ! Z_CONFIG_OF
 err0:
 	return err;
 }
@@ -77,10 +79,10 @@ static void __exit qdmabuf_mod_exit(void)
 {
 	pr_info("%s\n", version);
 
-#ifndef CONFIG_OF
+#if ! Z_CONFIG_OF
 	platform_device_del(pdev_qdmabuf);
 	platform_device_put(pdev_qdmabuf);
-#endif // CONFIG_OF
+#endif // ! Z_CONFIG_OF
 
 	qdmabuf_device_unregister();
 }

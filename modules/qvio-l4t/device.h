@@ -29,6 +29,10 @@ struct qvio_device {
 	void __iomem *bar[6];
 	int regions_in_use;
 	int got_regions;
+	int msi_enabled;
+	int msix_enabled;
+	int irq_line;
+	int irq_counter;
 
 	// DMA block for test
 	struct dma_block_t dma_block0;

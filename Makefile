@@ -1,7 +1,6 @@
 SUBDIRS = \
-	modules/qvcam \
 	modules/qdmabuf \
-	modules/qvio
+	modules/qvio-l4t
 
 SUBDIRS += \
 	samples/01_v4l-ctl \

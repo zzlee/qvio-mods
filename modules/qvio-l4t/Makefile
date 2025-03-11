@@ -10,12 +10,12 @@ qvio-objs := \
 	cdev.o \
 	umods.o
 
-qvio-objs += \
-	video.o \
-	queue.o
+# qvio-objs += \
+# 	video.o \
+# 	queue.o
 
 qvio-objs += pci_device.o
-qvio-objs += platform_device.o
+# qvio-objs += platform_device.o
 
 ccflags-y += \
 -O3 \

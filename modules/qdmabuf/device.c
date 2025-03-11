@@ -1,5 +1,6 @@
 #define pr_fmt(fmt)     "[" KBUILD_MODNAME "]%s(#%d): " fmt, __func__, __LINE__
 
+#include "config.h"
 #include "device.h"
 #include "cdev.h"
 #include "ioctl.h"
@@ -30,17 +31,17 @@ static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg
 static long __file_ioctl_compat(struct file *filep, unsigned int cmd, unsigned long arg);
 #endif
 
-#ifdef CONFIG_OF
+#if Z_CONFIG_OF
 extern struct of_device_id qdmabuf_of_match[];
-#endif // CONFIG_OF
+#endif // Z_CONFIG_OF
 
 static struct platform_driver __driver = {
 	.driver = {
 		.name = QDMABUF_DRIVER_NAME,
 		.owner = THIS_MODULE,
-#ifdef CONFIG_OF
+#if Z_CONFIG_OF
 		.of_match_table	= qdmabuf_of_match,
-#endif // CONFIG_OF
+#endif // Z_CONFIG_OF
 	},
 	.probe  = __probe,
 	.remove = __remove,

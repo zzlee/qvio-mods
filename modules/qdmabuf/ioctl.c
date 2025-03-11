@@ -9,7 +9,7 @@
 #include <linux/dma-buf.h>
 #include <linux/platform_device.h>
 
-static void sgt_dump(struct sg_table *sgt)
+static void sgt_dump(struct sg_table *sgt, bool full)
 {
 	int i;
 	struct scatterlist *sg = sgt->sgl;
@@ -17,13 +17,17 @@ static void sgt_dump(struct sg_table *sgt)
 
 	dma_addr = sg_dma_address(sg);
 
-	pr_info("sgt 0x%p, sgl 0x%p, nents %u/%u, dma_addr=%p.\n", sgt, sgt->sgl, sgt->nents,
-		sgt->orig_nents, dma_addr);
+	pr_info("sgt 0x%p, sgl 0x%p, nents %u/%u, dma_addr=%p. (PAGE_SIZE=%lu, PAGE_MASK=%lX)\n", sgt, sgt->sgl, sgt->nents,
+		sgt->orig_nents, (void*)dma_addr, PAGE_SIZE, PAGE_MASK);
 
 	for (i = 0; i < sgt->orig_nents; i++, sg = sg_next(sg)) {
-		if(i > 8) {
+		if(! full && i > 8) {
 			pr_info("... more pages ...\n");
 			break;
+		}
+
+		if((sg_dma_len(sg) & ~PAGE_MASK)) {
+			pr_err("unexpected dma_size!! %lX\n", (sg_dma_len(sg) & ~PAGE_MASK));
 		}
 
 		pr_info("%d, 0x%p, pg 0x%p,%u+%u, dma 0x%llx,%u.\n", i, sg,
@@ -141,7 +145,7 @@ long qdmabuf_ioctl_info(struct qdmabuf_device* device, unsigned long arg) {
 		goto err3;
 	}
 
-	sgt_dump(sgt);
+	sgt_dump(sgt, false);
 
 	args.size = dmabuf->size;
 	args.phy_addr = sg_dma_address(sgt->sgl);
