@@ -312,7 +312,7 @@ static int enable_msi_msix(struct qvio_device* self, struct pci_dev* pdev) {
 			goto err0;
 		}
 
-		pr_info("pci_alloc_irq_vectors_affinity() succeded!\n");
+		pr_info("pci_alloc_irq_vectors_affinity() succeeded!\n");
 		self->msi_enabled = 1;
 	}
 
