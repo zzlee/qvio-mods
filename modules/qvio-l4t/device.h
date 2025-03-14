@@ -8,8 +8,6 @@
 #include <linux/pci.h>
 #include <linux/cdev.h>
 
-#define QVIO_MAX_VIDEO 1
-
 struct dma_block_t {
 	size_t size;
 	void *cpu_addr;
@@ -31,16 +29,14 @@ struct qvio_device {
 	int got_regions;
 	int msi_enabled;
 	int msix_enabled;
-	int irq_line;
+	int irq_lines[32];
 	int irq_counter;
 
 	// DMA block for test
-	struct dma_block_t dma_block0;
+	struct dma_block_t dma_blocks[8];
 
 	// Char device
 	struct qvio_cdev cdev;
-
-	struct qvio_video* video[QVIO_MAX_VIDEO];
 };
 
 struct qvio_device* qvio_device_new(void);

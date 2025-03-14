@@ -8,7 +8,7 @@
 #include <linux/aer.h>
 #include <linux/pci.h>
 
-#define DRV_MODULE_NAME "qvio-pci"
+#define DRV_MODULE_NAME "qvio-l4t"
 
 static const struct pci_device_id __pci_ids[] = {
 	{ PCI_DEVICE(0x12AB, 0xE380), },
@@ -19,7 +19,7 @@ MODULE_DEVICE_TABLE(pci, __pci_ids);
 ssize_t qvio_dev_instance_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct qvio_device* self = dev_get_drvdata(dev);
-	__u32* val = self->dma_block0.cpu_addr;
+	__u32* val = self->dma_blocks[0].cpu_addr;
 
 	return snprintf(buf, PAGE_SIZE, "val=%u %u %u %u\n", val[0], val[1], val[2], val[3]);
 }
@@ -209,6 +209,18 @@ static int request_regions(struct qvio_device *self)
 	return rv;
 }
 
+static void release_regions(struct qvio_device *self, struct pci_dev* pdev) {
+	if (self->got_regions) {
+		pr_info("pci_release_regions 0x%p.\n", pdev);
+		pci_release_regions(pdev);
+	}
+
+	if (!self->regions_in_use) {
+		pr_info("pci_disable_device 0x%p.\n", pdev);
+		pci_disable_device(pdev);
+	}
+}
+
 static int set_dma_mask(struct pci_dev *pdev)
 {
 	if (!pdev) {
@@ -272,10 +284,137 @@ static irqreturn_t __irq_handler(int irq, void *dev_id)
 {
 	struct qvio_device* self = dev_id;
 
-	pr_info("IRQ: irq_counter=%d\n", self->irq_counter);
+	pr_info("IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
 	self->irq_counter++;
 
 	return IRQ_HANDLED;
+}
+
+static int enable_msi_msix(struct qvio_device* self, struct pci_dev* pdev) {
+	int err;
+	int msi_vec_count;
+
+	if(msi_msix_capable(pdev, PCI_CAP_ID_MSIX)) {
+		pr_err("unexpected, PCI_CAP_ID_MSIX\n");
+		err = -EINVAL;
+		goto err0;
+	}
+
+	if(msi_msix_capable(pdev, PCI_CAP_ID_MSI)) {
+		pci_keep_intx_enabled(pdev);
+
+		msi_vec_count = pci_msi_vec_count(pdev);
+		pr_info("pci_msi_vec_count() = %d\n", msi_vec_count);
+
+		err = pci_alloc_irq_vectors_affinity(pdev, msi_vec_count, msi_vec_count, PCI_IRQ_MSI, NULL);
+		if(err < 0) {
+			pr_err("pci_alloc_irq_vectors_affinity() failed, err=%d\n", err);
+			goto err0;
+		}
+
+		pr_info("pci_alloc_irq_vectors_affinity() succeded!\n");
+		self->msi_enabled = 1;
+	}
+
+	if(! (self->msi_enabled || self->msix_enabled)) {
+		pr_err("unexpected, msi_enabled=%d, msix_enabled=%d\n", self->msi_enabled, self->msix_enabled);
+		err = -EINVAL;
+		goto err0;
+	}
+
+	return 0;
+
+err0:
+	return err;
+}
+
+static void disable_msi_msix(struct qvio_device* self, struct pci_dev* pdev) {
+	if (self->msix_enabled) {
+		pci_disable_msix(pdev);
+		self->msix_enabled = 0;
+	} else if (self->msi_enabled) {
+		pci_disable_msi(pdev);
+		self->msi_enabled = 0;
+	}
+}
+
+static void free_irqs(struct qvio_device* self) {
+	int i;
+
+	for(i = 0;i < 32;i++) {
+		if(self->irq_lines[i]) {
+			free_irq(self->irq_lines[i], self);
+		}
+	}
+}
+
+static int irq_setup(struct qvio_device* self, struct pci_dev* pdev) {
+	int err;
+	int i;
+	u32 vector;
+
+	if(self->msi_enabled) {
+		for(i = 0;i < 8;i++) {
+			vector = pci_irq_vector(pdev, i);
+			if(vector == -EINVAL) {
+				err = -EINVAL;
+				pr_err("pci_irq_vector() failed\n");
+				goto err0;
+			}
+
+			err = request_irq(vector, __irq_handler, 0, DRV_MODULE_NAME, self);
+			if(err) {
+				pr_err("request_irq() failed, err=%d\n", err);
+				goto err0;
+			}
+
+			self->irq_lines[i] = vector;
+		}
+	}
+
+	return 0;
+
+err0:
+	free_irqs(self);
+
+	return err;
+}
+
+static void dma_blocks_free(struct qvio_device* self, struct pci_dev* pdev) {
+	int i;
+
+	for(i = 0;i < 8;i++) {
+		if(! self->dma_blocks[i].dma_handle)
+			continue;
+
+		dma_free_coherent(&pdev->dev, self->dma_blocks[i].size, self->dma_blocks[i].cpu_addr, self->dma_blocks[i].dma_handle);
+	}
+}
+
+static int dma_blocks_alloc(struct qvio_device* self, struct pci_dev* pdev) {
+	int err;
+	int i;
+
+	for(i = 0;i < 8;i++) {
+		self->dma_blocks[i].size = 4096;
+		self->dma_blocks[i].gfp = GFP_KERNEL | GFP_DMA;
+		self->dma_blocks[i].cpu_addr = dma_alloc_coherent(&pdev->dev, self->dma_blocks[i].size,
+			&self->dma_blocks[i].dma_handle, self->dma_blocks[i].gfp);
+		if(err) {
+			pr_err("dma_alloc_coherent() failed, err=%d\n", err);
+			goto err0;
+		}
+
+		pr_info("dma_blocks[%d]: size=%d cpu_addr=%llx dma_handle=%llx", i,
+			(int)self->dma_blocks[i].size, (u64)self->dma_blocks[i].cpu_addr, (u64)self->dma_blocks[i].dma_handle);
+	}
+
+	return 0;
+
+err0:
+	dma_blocks_free(self, pdev);
+
+	return err;
 }
 
 static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
@@ -333,110 +472,61 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	err = map_bars(self);
 	if(err) {
 		pr_err("map_bars() failed, err=%d\n", err);
-		goto err1;
+		goto err2;
 	}
 
 	err = set_dma_mask(pdev);
 	if(err) {
 		pr_err("set_dma_mask() failed, err=%d\n", err);
-		goto err2;
+		goto err3;
 	}
 
-	if(msi_msix_capable(pdev, PCI_CAP_ID_MSIX)) {
-		pr_warn("unexpected, PCI_CAP_ID_MSIX\n");
-	} else if(msi_msix_capable(pdev, PCI_CAP_ID_MSI)) {
-		err = pci_enable_msi(pdev);
-		if(err) {
-			pr_err("pci_enable_msi() failed, err=%d\n", err);
-		} else {
-			pr_info("pci_enable_msi() succeeded\n");
-
-			self->msi_enabled = 1;
-
-			pci_keep_intx_enabled(pdev);
-
-			pr_info("pdev->irq=%d\n", pdev->irq);
-			err = request_irq(pdev->irq, __irq_handler, 0, "qvio", self);
-			if(err) {
-				pr_err("request_irq() failed, err=%d\n", err);
-			} else {
-				self->irq_line = pdev->irq;
-			}
-		}
+	err = enable_msi_msix(self, pdev);
+	if(err) {
+		pr_err("enable_msi_msix() failed, err=%d\n", err);
+		goto err3;
 	}
 
-	pr_info("msi_enabled=%d, msix_enabled=%d\n", self->msi_enabled, self->msix_enabled);
+	err = irq_setup(self, pdev);
+	if(err) {
+		pr_err("irq_setup() failed, err=%d\n", err);
+		goto err4;
+	}
 
 	self->cdev.fops = &__fops;
 	self->cdev.private_data = self;
 	err = qvio_cdev_start(&self->cdev);
 	if(err) {
 		pr_err("qvio_cdev_start() failed, err=%d\n", err);
-		goto err2;
-	}
-
-#if 0
-	self->video[0] = qvio_video_new();
-	if(! self) {
-		pr_err("qvio_video_new() failed\n");
-		err = -ENOMEM;
-		goto err3;
-	}
-
-	self->video[0]->qdev = self;
-
-	self->video[0]->vfl_dir = VFL_DIR_RX;
-	self->video[0]->buffer_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	self->video[0]->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
-	snprintf(self->video[0]->bus_info, sizeof(self->video[0]->bus_info), "platform");
-	snprintf(self->video[0]->v4l2_dev.name, sizeof(self->video[0]->v4l2_dev.name), "qvio-rx");
-
-	err = qvio_video_start(self->video[0]);
-	if(err) {
-		pr_err("qvio_qvio_start() failed, err=%d\n", err);
-		goto err4;
-	}
-#endif
-
-	self->dma_block0.size = 4096;
-	self->dma_block0.gfp = GFP_KERNEL | GFP_DMA;
-	self->dma_block0.cpu_addr = dma_alloc_coherent(&pdev->dev, self->dma_block0.size,
-		&self->dma_block0.dma_handle, self->dma_block0.gfp);
-	if(err) {
-		pr_err("dma_alloc_coherent() failed, err=%d\n", err);
 		goto err5;
 	}
 
-	pr_info("DMA: size=%d cpu_addr=%llx dma_handle=%llx", (int)self->dma_block0.size,
-		(u64)self->dma_block0.cpu_addr, (u64)self->dma_block0.dma_handle);
+	err = dma_blocks_alloc(self, pdev);
+	if(err) {
+		pr_err("dma_blocks_alloc() failed, err=%d\n", err);
+		goto err6;
+	}
 
 	err = device_create_file(&pdev->dev, &dev_attr_qvio_dev_instance);
 	if (err) {
 		pr_err("device_create_file() failed, err=%d\n", err);
-		goto err6;
+		goto err7;
 	}
 
 	return 0;
 
+err7:
+	dma_blocks_free(self, pdev);
 err6:
-	dma_free_coherent(&pdev->dev, self->dma_block0.size, self->dma_block0.cpu_addr, self->dma_block0.dma_handle);
-err5:
-#if 0
-	qvio_video_stop(self->video[0]);
-err4:
-	qvio_video_put(self->video[0]);
-err3:
-#endif
 	qvio_cdev_stop(&self->cdev);
-err2:
-	if(self->irq_line) {
-		free_irq(self->irq_line, self);
-	}
-	if(self->msi_enabled) {
-		pci_disable_msi(pdev);
-		self->msi_enabled = 0;
-	}
+err5:
+	free_irqs(self);
+err4:
+	disable_msi_msix(self, pdev);
+err3:
 	unmap_bars(self);
+err2:
+	release_regions(self, pdev);
 err1:
 	qvio_device_put(self);
 err0:
@@ -452,31 +542,12 @@ static void __pci_remove(struct pci_dev *pdev) {
 		return;
 
 	device_remove_file(&pdev->dev, &dev_attr_qvio_dev_instance);
-	dma_free_coherent(&pdev->dev, self->dma_block0.size, self->dma_block0.cpu_addr, self->dma_block0.dma_handle);
-#if 0
-	qvio_video_stop(self->video[0]);
-	qvio_video_put(self->video[0]);
-#endif
+	dma_blocks_free(self, pdev);
 	qvio_cdev_stop(&self->cdev);
-	if(self->irq_line) {
-		free_irq(self->irq_line, self);
-	}
-	if(self->msi_enabled) {
-		pci_disable_msi(pdev);
-		self->msi_enabled = 0;
-	}
+	free_irqs(self);
+	disable_msi_msix(self, pdev);
 	unmap_bars(self);
-
-	if (self->got_regions) {
-		pr_info("pci_release_regions 0x%p.\n", pdev);
-		pci_release_regions(pdev);
-	}
-
-	if (!self->regions_in_use) {
-		pr_info("pci_disable_device 0x%p.\n", pdev);
-		pci_disable_device(pdev);
-	}
-
+	release_regions(self, pdev);
 	qvio_device_put(self);
 	dev_set_drvdata(&pdev->dev, NULL);
 }
