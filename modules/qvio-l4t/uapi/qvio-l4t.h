@@ -133,15 +133,15 @@ struct qvio_umods_rsp_req {
 	struct qvio_umods_req req;
 };
 
-#define QVID_IOC_MAGIC		'Q'
+#define QVIO_IOC_MAGIC		'Q'
 
 // qvio v4l2 ioctls
-#define QVID_IOC_G_UMODS_FD			_IOWR(QVID_IOC_MAGIC, BASE_VIDIOC_PRIVATE+0, struct qvio_umods_fd)
-#define QVID_IOC_BUF_DONE			_IO  (QVID_IOC_MAGIC, BASE_VIDIOC_PRIVATE+1)
-#define QVID_IOC_S_BUF_DONE			_IOWR(QVID_IOC_MAGIC, BASE_VIDIOC_PRIVATE+0, struct qvio_umods_fd)
+#define QVID_IOC_G_UMODS_FD			_IOWR(QVIO_IOC_MAGIC, BASE_VIDIOC_PRIVATE+0, struct qvio_umods_fd)
+#define QVID_IOC_BUF_DONE			_IO  (QVIO_IOC_MAGIC, BASE_VIDIOC_PRIVATE+1)
+#define QVID_IOC_S_BUF_DONE			_IOWR(QVIO_IOC_MAGIC, BASE_VIDIOC_PRIVATE+0, struct qvio_umods_fd)
 
 // UMODS_FD ioctls
-#define QVID_IOC_G_UMODS_REQ		_IOWR(QVID_IOC_MAGIC, 1, struct qvio_umods_req)
-#define QVID_IOC_S_UMODS_RSP		_IOWR(QVID_IOC_MAGIC, 2, struct qvio_umods_rsp)
+#define QVID_IOC_G_UMODS_REQ		_IOWR(QVIO_IOC_MAGIC, 1, struct qvio_umods_req)
+#define QVID_IOC_S_UMODS_RSP		_IOWR(QVIO_IOC_MAGIC, 2, struct qvio_umods_rsp)
 
 #endif /* _UAPI_LINUX_QVIO_L4T_H */

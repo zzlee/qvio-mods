@@ -16,15 +16,74 @@ static const struct pci_device_id __pci_ids[] = {
 };
 MODULE_DEVICE_TABLE(pci, __pci_ids);
 
-ssize_t qvio_dev_instance_show(struct device *dev, struct device_attribute *attr, char *buf)
+ssize_t dma_block_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct qvio_device* self = dev_get_drvdata(dev);
-	__u32* val = self->dma_blocks[0].cpu_addr;
+	__u8* p = (__u8*)self->dma_blocks[self->dma_block_index].cpu_addr + self->dma_block_offset;
 
-	return snprintf(buf, PAGE_SIZE, "val=%u %u %u %u\n", val[0], val[1], val[2], val[3]);
+	return snprintf(buf, PAGE_SIZE, "%02X %02X %02X %02X %02X %02X %02X %02X\n%02X %02X %02X %02X %02X %02X %02X %02X\n",
+		p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],
+		p[8], p[9], p[10], p[11], p[12], p[13], p[14], p[15]);
 }
 
-static DEVICE_ATTR_RO(qvio_dev_instance);
+ssize_t dma_block_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct qvio_device* self = dev_get_drvdata(dev);
+	__u32* p = (__u32*)self->dma_blocks[self->dma_block_index].cpu_addr + self->dma_block_offset;
+	__u32 val;
+
+	sscanf(buf, "%u", &val);
+
+	*p = val;
+
+	return count;
+}
+
+ssize_t dma_block_index_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct qvio_device* self = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", self->dma_block_index);
+}
+
+ssize_t dma_block_index_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct qvio_device* self = dev_get_drvdata(dev);
+	int dma_block_index;
+
+	sscanf(buf, "%d", &dma_block_index);
+
+	if(dma_block_index >= 0 && dma_block_index < 8) {
+		self->dma_block_index = dma_block_index;
+	}
+
+	return count;
+}
+
+ssize_t dma_block_offset_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct qvio_device* self = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", self->dma_block_offset);
+}
+
+ssize_t dma_block_offset_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct qvio_device* self = dev_get_drvdata(dev);
+	int dma_block_offset;
+
+	sscanf(buf, "%d", &dma_block_offset);
+
+	if(dma_block_offset >= 0 && dma_block_offset < (PAGE_SIZE >> 2)) {
+		self->dma_block_offset = dma_block_offset;
+	}
+
+	return count;
+}
+
+static DEVICE_ATTR(dma_block, 0644, dma_block_show, dma_block_store);
+static DEVICE_ATTR(dma_block_index, 0644, dma_block_index_show, dma_block_index_store);
+static DEVICE_ATTR(dma_block_offset, 0644, dma_block_offset_show, dma_block_offset_store);
 
 static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg) {
 	long ret;
@@ -417,6 +476,43 @@ err0:
 	return err;
 }
 
+static int create_dev_attrs(struct device* dev) {
+	int err;
+
+	err = device_create_file(dev, &dev_attr_dma_block);
+	if (err) {
+		pr_err("device_create_file() failed, err=%d\n", err);
+		goto err0;
+	}
+
+	err = device_create_file(dev, &dev_attr_dma_block_index);
+	if (err) {
+		pr_err("device_create_file() failed, err=%d\n", err);
+		goto err1;
+	}
+
+	err = device_create_file(dev, &dev_attr_dma_block_offset);
+	if (err) {
+		pr_err("device_create_file() failed, err=%d\n", err);
+		goto err2;
+	}
+
+	return 0;
+
+err2:
+	device_remove_file(dev, &dev_attr_dma_block_index);
+err1:
+	device_remove_file(dev, &dev_attr_dma_block);
+err0:
+	return err;
+}
+
+static void remove_dev_attrs(struct device* dev) {
+	device_remove_file(dev, &dev_attr_dma_block_offset);
+	device_remove_file(dev, &dev_attr_dma_block_index);
+	device_remove_file(dev, &dev_attr_dma_block);
+}
+
 static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	int err = 0;
 	struct qvio_device* self;
@@ -507,9 +603,9 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 		goto err6;
 	}
 
-	err = device_create_file(&pdev->dev, &dev_attr_qvio_dev_instance);
+	err = create_dev_attrs(&pdev->dev);
 	if (err) {
-		pr_err("device_create_file() failed, err=%d\n", err);
+		pr_err("create_dev_attrs() failed, err=%d\n", err);
 		goto err7;
 	}
 
@@ -541,7 +637,7 @@ static void __pci_remove(struct pci_dev *pdev) {
 	if (! self)
 		return;
 
-	device_remove_file(&pdev->dev, &dev_attr_qvio_dev_instance);
+	remove_dev_attrs(&pdev->dev);
 	dma_blocks_free(self, pdev);
 	qvio_cdev_stop(&self->cdev);
 	free_irqs(self);

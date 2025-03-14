@@ -35,6 +35,10 @@ struct qvio_device {
 	// DMA block for test
 	struct dma_block_t dma_blocks[8];
 
+	// vars for dev-attr
+	int dma_block_index;
+	int dma_block_offset;
+
 	// Char device
 	struct qvio_cdev cdev;
 };
