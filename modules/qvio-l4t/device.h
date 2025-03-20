@@ -8,6 +8,8 @@
 #include <linux/pci.h>
 #include <linux/cdev.h>
 
+#include "xaximm_test1.h"
+
 struct dma_block_t {
 	size_t size;
 	void *cpu_addr;
@@ -37,10 +39,14 @@ struct qvio_device {
 
 	// vars for dev-attr
 	int dma_block_index;
-	int dma_block_offset;
+	int test_case;
 
 	// Char device
 	struct qvio_cdev cdev;
+
+	// IP cores
+	XAximm_test1 xaximm_test1;
+	void __iomem * zzlab_env;
 };
 
 struct qvio_device* qvio_device_new(void);

@@ -1,3 +1,7 @@
+# Xilinx
+.Xil
+xrc.log
+
 # Prerequisites
 *.d
 

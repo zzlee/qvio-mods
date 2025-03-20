@@ -19,22 +19,21 @@ MODULE_DEVICE_TABLE(pci, __pci_ids);
 ssize_t dma_block_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct qvio_device* self = dev_get_drvdata(dev);
-	__u8* p = (__u8*)self->dma_blocks[self->dma_block_index].cpu_addr + self->dma_block_offset;
+	__u8* p = (__u8*)self->dma_blocks[self->dma_block_index].cpu_addr;
+	ssize_t count = min(PAGE_SIZE, self->dma_blocks[self->dma_block_index].size);
 
-	return snprintf(buf, PAGE_SIZE, "%02X %02X %02X %02X %02X %02X %02X %02X\n%02X %02X %02X %02X %02X %02X %02X %02X\n",
-		p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],
-		p[8], p[9], p[10], p[11], p[12], p[13], p[14], p[15]);
+	memcpy(buf, p, count);
+
+	return count;
 }
 
 ssize_t dma_block_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct qvio_device* self = dev_get_drvdata(dev);
-	__u32* p = (__u32*)self->dma_blocks[self->dma_block_index].cpu_addr + self->dma_block_offset;
-	__u32 val;
+	__u8* p = (__u8*)self->dma_blocks[self->dma_block_index].cpu_addr;
+	count = min(count, self->dma_blocks[self->dma_block_index].size);
 
-	sscanf(buf, "%u", &val);
-
-	*p = val;
+	memcpy(p, buf, count);
 
 	return count;
 }
@@ -53,37 +52,208 @@ ssize_t dma_block_index_store(struct device *dev, struct device_attribute *attr,
 
 	sscanf(buf, "%d", &dma_block_index);
 
-	if(dma_block_index >= 0 && dma_block_index < 8) {
+	if(dma_block_index >= 0 && dma_block_index < ARRAY_SIZE(self->dma_blocks)) {
 		self->dma_block_index = dma_block_index;
 	}
 
 	return count;
 }
 
-ssize_t dma_block_offset_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct qvio_device* self = dev_get_drvdata(dev);
+#define DESC_BITSHIFT				4
+#define DESC_SIZE					(1 << DESC_BITSHIFT)
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", self->dma_block_offset);
+struct __attribute__((__packed__)) desc_item_t {
+	s32 nOffsetHigh;
+	u32 nOffsetLow;
+	u32 nSize;
+	u32 nFlags;
+};
+
+void do_test_case_0(struct qvio_device* self) {
+	XAximm_test1* pXaximm_test1 = &self->xaximm_test1;
+	int nDescItems = 1;
+	int nWidth = 64;
+	int nHeight = 32;
+	int nStride = nWidth + 16;
+	struct desc_item_t* pDescItem;
+	u64 nDescOffset;
+	u64 nOffset;
+	u32 nIsIdle;
+
+	pDescItem = self->dma_blocks[0].cpu_addr;
+
+	// desc-item header
+	nDescOffset = (u8*)(&pDescItem[1]) - (u8*)self->dma_blocks[0].cpu_addr;
+	pDescItem->nOffsetHigh = ((nDescOffset >> 32) & 0xFFFFFFFF);
+	pDescItem->nOffsetLow = (nDescOffset & 0xFFFFFFFF);
+	pDescItem->nSize = nDescItems << DESC_BITSHIFT;
+	pDescItem->nFlags = 0;
+	pr_info("(%08X %08X) %08X %08X\n", pDescItem->nOffsetHigh, pDescItem->nOffsetLow, pDescItem->nSize, pDescItem->nFlags);
+	pDescItem++;
+
+	// buffer desc-item
+	nOffset = 0;
+	pDescItem->nOffsetHigh = ((nOffset >> 32) & 0xFFFFFFFF);
+	pDescItem->nOffsetLow = (nOffset & 0xFFFFFFFF);
+	pDescItem->nSize = nStride * nHeight;
+	pDescItem->nFlags = 0;
+	pr_info("(%08X %08X) %08X %08X\n", pDescItem->nOffsetHigh, pDescItem->nOffsetLow, pDescItem->nSize, pDescItem->nFlags);
+	pDescItem++;
+
+	dma_sync_single_for_device(self->dev, self->dma_blocks[0].dma_handle, self->dma_blocks[0].size, DMA_BIDIRECTIONAL);
+
+	nIsIdle = XAximm_test1_IsIdle(pXaximm_test1);
+	pr_info("XAximm_test1_IsIdle()=%u\n", nIsIdle);
+	if(! nIsIdle) {
+		goto err0;
+	}
+
+	XAximm_test1_DisableAutoRestart(pXaximm_test1);
+	XAximm_test1_InterruptEnable(pXaximm_test1, 0x1); // ap_done
+	XAximm_test1_InterruptGlobalEnable(pXaximm_test1);
+
+	XAximm_test1_Set_pDescItem(pXaximm_test1, self->dma_blocks[0].dma_handle);
+	XAximm_test1_Set_nDescItemCount(pXaximm_test1, 2);
+	XAximm_test1_Set_pDstPxl(pXaximm_test1, self->dma_blocks[1].dma_handle);
+	XAximm_test1_Set_nDstPxlStride(pXaximm_test1, nStride);
+	XAximm_test1_Set_nWidth(pXaximm_test1, nWidth);
+	XAximm_test1_Set_nHeight(pXaximm_test1, nHeight);
+
+	XAximm_test1_Start(pXaximm_test1);
+
+	return;
+
+err0:
+	return;
 }
 
-ssize_t dma_block_offset_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+void do_test_case_1(struct qvio_device* self) {
+	XAximm_test1* pXaximm_test1 = &self->xaximm_test1;
+	u32 nIsIdle;
+
+	XAximm_test1_InterruptClear(pXaximm_test1, 0x01); // ap_done;
+
+	nIsIdle = XAximm_test1_IsIdle(pXaximm_test1);
+	pr_info("XAximm_test1_IsIdle()=%u\n", nIsIdle);
+}
+
+void do_test_case_2(struct qvio_device* self) {
+	XAximm_test1* pXaximm_test1 = &self->xaximm_test1;
+	int nDescItems = 3;
+	int nWidth = 64;
+	int nHeight = 128;
+	int nStride = nWidth + 16;
+	struct desc_item_t* pDescBase;
+	struct desc_item_t* pDescItem;
+	dma_addr_t pDstBase;
+	size_t nDstSize = nStride * nHeight;
+	u64 nDescOffset;
+	u64 nDstOffset;
+	int nDmaBlockIndex = 1;
+	u32 nIsIdle;
+
+	pDescBase = self->dma_blocks[0].cpu_addr;
+	pDstBase = self->dma_blocks[1].dma_handle;
+	pDescItem = self->dma_blocks[0].cpu_addr;
+
+	// desc-item header
+	nDescOffset = (u8*)(pDescItem + 1) - (u8*)pDescBase;
+	pDescItem->nOffsetHigh = ((nDescOffset >> 32) & 0xFFFFFFFF);
+	pDescItem->nOffsetLow = (nDescOffset & 0xFFFFFFFF);
+	pDescItem->nSize = nDescItems << DESC_BITSHIFT;
+	pDescItem->nFlags = 0;
+	pr_info("[*] (%08X %08X) %08X %08X\n", pDescItem->nOffsetHigh, pDescItem->nOffsetLow, pDescItem->nSize, pDescItem->nFlags);
+	pDescItem++;
+
+	// buffer desc-item
+	do {
+		nDstOffset = self->dma_blocks[nDmaBlockIndex].dma_handle - pDstBase;
+		pDescItem->nOffsetHigh = ((nDstOffset >> 32) & 0xFFFFFFFF);
+		pDescItem->nOffsetLow = (nDstOffset & 0xFFFFFFFF);
+		pDescItem->nSize = min(self->dma_blocks[nDmaBlockIndex].size, nDstSize);
+		pDescItem->nFlags = 0;
+		pr_info("[%d] (%08X %08X) %08X %08X\n", nDmaBlockIndex, pDescItem->nOffsetHigh, pDescItem->nOffsetLow, pDescItem->nSize, pDescItem->nFlags);
+		pDescItem++;
+
+		nDstSize -= pDescItem->nSize;
+		nDmaBlockIndex++;
+	} while(nDstSize > 0);
+	pr_warn("nDmaBlockIndex=%u\n", nDmaBlockIndex);
+
+	dma_sync_single_for_device(self->dev, self->dma_blocks[0].dma_handle, self->dma_blocks[0].size, DMA_BIDIRECTIONAL);
+
+	nIsIdle = XAximm_test1_IsIdle(pXaximm_test1);
+	pr_info("XAximm_test1_IsIdle()=%u\n", nIsIdle);
+	if(! nIsIdle) {
+		goto err0;
+	}
+
+	XAximm_test1_DisableAutoRestart(pXaximm_test1);
+	XAximm_test1_InterruptEnable(pXaximm_test1, 0x1); // ap_done
+	XAximm_test1_InterruptGlobalEnable(pXaximm_test1);
+
+	XAximm_test1_Set_pDescItem(pXaximm_test1, self->dma_blocks[0].dma_handle);
+	XAximm_test1_Set_nDescItemCount(pXaximm_test1, 2);
+	XAximm_test1_Set_pDstPxl(pXaximm_test1, pDstBase);
+	XAximm_test1_Set_nDstPxlStride(pXaximm_test1, nStride);
+	XAximm_test1_Set_nWidth(pXaximm_test1, nWidth);
+	XAximm_test1_Set_nHeight(pXaximm_test1, nHeight);
+
+	XAximm_test1_Start(pXaximm_test1);
+	return;
+
+err0:
+	return;
+}
+
+void do_test_case(struct qvio_device* self, int test_case) {
+	switch(test_case) {
+	case 0:
+		pr_info("+test_case %d\n", test_case);
+		do_test_case_0(self);
+		pr_info("-test_case %d\n", test_case);
+		break;
+
+	case 1:
+		pr_info("+test_case %d\n", test_case);
+		do_test_case_1(self);
+		pr_info("-test_case %d\n", test_case);
+		break;
+
+	case 2:
+		pr_info("+test_case %d\n", test_case);
+		do_test_case_2(self);
+		pr_info("-test_case %d\n", test_case);
+		break;
+
+	default:
+		pr_warn("unexpected test_case %d\n", test_case);
+		break;
+	}
+}
+
+ssize_t test_case_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct qvio_device* self = dev_get_drvdata(dev);
-	int dma_block_offset;
 
-	sscanf(buf, "%d", &dma_block_offset);
+	return snprintf(buf, PAGE_SIZE, "%d\n", self->test_case);
+}
 
-	if(dma_block_offset >= 0 && dma_block_offset < (PAGE_SIZE >> 2)) {
-		self->dma_block_offset = dma_block_offset;
-	}
+ssize_t test_case_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct qvio_device* self = dev_get_drvdata(dev);
+	int test_case;
+
+	sscanf(buf, "%d", &test_case);
+	do_test_case(self, test_case);
+	self->test_case = test_case;
 
 	return count;
 }
 
 static DEVICE_ATTR(dma_block, 0644, dma_block_show, dma_block_store);
 static DEVICE_ATTR(dma_block_index, 0644, dma_block_index_show, dma_block_index_store);
-static DEVICE_ATTR(dma_block_offset, 0644, dma_block_offset_show, dma_block_offset_store);
+static DEVICE_ATTR(test_case, 0644, test_case_show, test_case_store);
 
 static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg) {
 	long ret;
@@ -349,6 +519,26 @@ static irqreturn_t __irq_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t __irq_handler_0(int irq, void *dev_id)
+{
+	struct qvio_device* self = dev_id;
+
+	pr_info("AXIMM_TEST1, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+	self->irq_counter++;
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t __irq_handler_1(int irq, void *dev_id)
+{
+	struct qvio_device* self = dev_id;
+
+	pr_info("TPG, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+	self->irq_counter++;
+
+	return IRQ_HANDLED;
+}
+
 static int enable_msi_msix(struct qvio_device* self, struct pci_dev* pdev) {
 	int err;
 	int msi_vec_count;
@@ -400,7 +590,7 @@ static void disable_msi_msix(struct qvio_device* self, struct pci_dev* pdev) {
 static void free_irqs(struct qvio_device* self) {
 	int i;
 
-	for(i = 0;i < 32;i++) {
+	for(i = 0;i < ARRAY_SIZE(self->irq_lines);i++) {
 		if(self->irq_lines[i]) {
 			free_irq(self->irq_lines[i], self);
 		}
@@ -411,9 +601,10 @@ static int irq_setup(struct qvio_device* self, struct pci_dev* pdev) {
 	int err;
 	int i;
 	u32 vector;
+	irqreturn_t (*irq_handler)(int, void *);
 
 	if(self->msi_enabled) {
-		for(i = 0;i < 8;i++) {
+		for(i = 0;i < ARRAY_SIZE(self->irq_lines);i++) {
 			vector = pci_irq_vector(pdev, i);
 			if(vector == -EINVAL) {
 				err = -EINVAL;
@@ -421,9 +612,23 @@ static int irq_setup(struct qvio_device* self, struct pci_dev* pdev) {
 				goto err0;
 			}
 
-			err = request_irq(vector, __irq_handler, 0, DRV_MODULE_NAME, self);
+			switch(i) {
+			case 0:
+				irq_handler = __irq_handler_0;
+				break;
+
+			case 1:
+				irq_handler = __irq_handler_1;
+				break;
+
+			default:
+				irq_handler = __irq_handler;
+				break;
+			}
+
+			err = request_irq(vector, irq_handler, 0, DRV_MODULE_NAME, self);
 			if(err) {
-				pr_err("request_irq() failed, err=%d\n", err);
+				pr_err("%d: request_irq(%u) failed, err=%d\n", i, vector, err);
 				goto err0;
 			}
 
@@ -442,7 +647,7 @@ err0:
 static void dma_blocks_free(struct qvio_device* self, struct pci_dev* pdev) {
 	int i;
 
-	for(i = 0;i < 8;i++) {
+	for(i = 0;i < ARRAY_SIZE(self->dma_blocks);i++) {
 		if(! self->dma_blocks[i].dma_handle)
 			continue;
 
@@ -454,8 +659,8 @@ static int dma_blocks_alloc(struct qvio_device* self, struct pci_dev* pdev) {
 	int err;
 	int i;
 
-	for(i = 0;i < 8;i++) {
-		self->dma_blocks[i].size = 4096;
+	for(i = 0;i < ARRAY_SIZE(self->dma_blocks);i++) {
+		self->dma_blocks[i].size = PAGE_SIZE;
 		self->dma_blocks[i].gfp = GFP_KERNEL | GFP_DMA;
 		self->dma_blocks[i].cpu_addr = dma_alloc_coherent(&pdev->dev, self->dma_blocks[i].size,
 			&self->dma_blocks[i].dma_handle, self->dma_blocks[i].gfp);
@@ -491,7 +696,7 @@ static int create_dev_attrs(struct device* dev) {
 		goto err1;
 	}
 
-	err = device_create_file(dev, &dev_attr_dma_block_offset);
+	err = device_create_file(dev, &dev_attr_test_case);
 	if (err) {
 		pr_err("device_create_file() failed, err=%d\n", err);
 		goto err2;
@@ -500,7 +705,7 @@ static int create_dev_attrs(struct device* dev) {
 	return 0;
 
 err2:
-	device_remove_file(dev, &dev_attr_dma_block_index);
+	device_remove_file(dev, &dev_attr_test_case);
 err1:
 	device_remove_file(dev, &dev_attr_dma_block);
 err0:
@@ -508,7 +713,7 @@ err0:
 }
 
 static void remove_dev_attrs(struct device* dev) {
-	device_remove_file(dev, &dev_attr_dma_block_offset);
+	device_remove_file(dev, &dev_attr_test_case);
 	device_remove_file(dev, &dev_attr_dma_block_index);
 	device_remove_file(dev, &dev_attr_dma_block);
 }
@@ -588,6 +793,18 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 		pr_err("irq_setup() failed, err=%d\n", err);
 		goto err4;
 	}
+
+	self->zzlab_env = (void __iomem *)(self->bar[0] + 0x10000);
+	pr_info("zzlab_env = %p\n", self->zzlab_env);
+
+	self->xaximm_test1.Control_BaseAddress = (u64)self->bar[0] + 0x20000;
+	self->xaximm_test1.IsReady = XIL_COMPONENT_IS_READY;
+	pr_info("xaximm_test1 = %p\n", (void*)self->xaximm_test1.Control_BaseAddress);
+
+	pr_info("Version: %08X %08X %08X\n",
+		*(u32*)((u8*)self->zzlab_env + 0x10),
+		*(u32*)((u8*)self->zzlab_env + 0x14),
+		*(u32*)((u8*)self->zzlab_env + 0x18));
 
 	self->cdev.fops = &__fops;
 	self->cdev.private_data = self;
