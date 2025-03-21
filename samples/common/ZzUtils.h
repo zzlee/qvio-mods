@@ -52,6 +52,40 @@ namespace ZzUtils {
 		bool Log(int64_t bits, int64_t ts);
 	};
 
+	struct RateCtrl {
+		typedef RateCtrl self_t;
+
+		int num;
+		int den;
+
+		explicit RateCtrl();
+
+		void Start(int64_t t);
+		bool Next(int64_t t);
+		int64_t Advance();
+
+		int64_t nTicks;
+		int64_t nCurTime;
+		int64_t nDenSecs;
+		int64_t nTimer;
+	};
+
+	struct BitRateCtrl : public RateCtrl {
+		typedef BitRateCtrl self_t;
+		typedef RateCtrl super_t;
+
+		int64_t bitrate;
+
+		explicit BitRateCtrl();
+
+		void Start(int64_t t);
+		int64_t Advance();
+		bool Consume(int64_t bits);
+		int64_t Flush();
+
+		int64_t nBits;
+	};
+
 	void TestLoop(std::function<int (int)> idle, int64_t dur_num = 1000000LL, int64_t dur_den = 60LL);
 }
 

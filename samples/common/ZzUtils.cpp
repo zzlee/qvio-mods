@@ -140,4 +140,61 @@ namespace ZzUtils {
 		int64_t fini = _clk();
 		LOGW("Test done. %.4fs", (fini - beg) / 1000000.0);
 	}
+
+	RateCtrl::RateCtrl() {
+	}
+
+	void RateCtrl::Start(int64_t t) {
+		nDenSecs = den * 1000000LL;
+		nTimer = t;
+	}
+
+	bool RateCtrl::Next(int64_t t) {
+		int64_t nDiff = t - nTimer;
+		nTicks = nDiff * num / nDenSecs;
+		nCurTime = t;
+
+		return nTicks > 0;
+	}
+
+	int64_t RateCtrl::Advance() {
+		int64_t nNextTimer = nTimer + (nTicks + 1) * nDenSecs / num;
+
+		nTimer += nTicks * nDenSecs / num;
+
+		return nNextTimer - nCurTime;
+	}
+
+	BitRateCtrl::BitRateCtrl() {
+	}
+
+	void BitRateCtrl::Start(int64_t t) {
+		super_t::Start(t);
+		nBits = 0;
+	}
+
+	int64_t BitRateCtrl::Advance() {
+		int64_t nNextTimer = nTimer + (nTicks + 1) * nDenSecs / num;
+
+		nTimer += nTicks * nDenSecs / num;
+		nBits += (nTicks * den * bitrate) / num;
+
+		return nNextTimer - nCurTime;
+	}
+
+	bool BitRateCtrl::Consume(int64_t bits) {
+		if(bits > nBits)
+			return false;
+
+		nBits -= bits;
+
+		return true;
+	}
+
+	int64_t BitRateCtrl::Flush() {
+		int64_t nRet = nBits;
+		nBits = 0;
+
+		return nRet;
+	}
 }

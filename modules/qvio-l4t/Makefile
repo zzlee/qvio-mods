@@ -8,7 +8,8 @@ qvio-objs := \
 	module.o \
 	device.o \
 	cdev.o \
-	umods.o
+	umods.o \
+	buf_entry.o
 
 # qvio-objs += \
 # 	video.o \

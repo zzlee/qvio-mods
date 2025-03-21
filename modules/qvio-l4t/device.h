@@ -3,6 +3,7 @@
 
 #include "cdev.h"
 #include "video.h"
+#include "buf_entry.h"
 
 #include <linux/platform_device.h>
 #include <linux/pci.h>
@@ -47,6 +48,17 @@ struct qvio_device {
 	// IP cores
 	XAximm_test1 xaximm_test1;
 	void __iomem * zzlab_env;
+	u32 width;
+	u32 height;
+	u32 fmt; // fourcc
+
+	// job list
+	spinlock_t job_list_lock;
+	struct list_head job_list; // qvio_buf_entry
+
+	// done list
+	spinlock_t done_list_lock;
+	struct list_head done_list; // qvio_buf_entry
 };
 
 struct qvio_device* qvio_device_new(void);

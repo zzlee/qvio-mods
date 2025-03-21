@@ -14,6 +14,12 @@ struct qvio_device* qvio_device_new(void) {
 
 	kref_init(&self->ref);
 
+	spin_lock_init(&self->job_list_lock);
+	INIT_LIST_HEAD(&self->job_list);
+
+	spin_lock_init(&self->done_list_lock);
+	INIT_LIST_HEAD(&self->done_list);
+
 	return self;
 
 err0:

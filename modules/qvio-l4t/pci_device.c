@@ -10,6 +10,16 @@
 
 #define DRV_MODULE_NAME "qvio-l4t"
 
+#define DESC_BITSHIFT				4
+#define DESC_SIZE					(1 << DESC_BITSHIFT)
+
+struct __attribute__((__packed__)) desc_item_t {
+	s32 nOffsetHigh;
+	u32 nOffsetLow;
+	u32 nSize;
+	u32 nFlags;
+};
+
 static const struct pci_device_id __pci_ids[] = {
 	{ PCI_DEVICE(0x12AB, 0xE380), },
 	{0,}
@@ -58,16 +68,6 @@ ssize_t dma_block_index_store(struct device *dev, struct device_attribute *attr,
 
 	return count;
 }
-
-#define DESC_BITSHIFT				4
-#define DESC_SIZE					(1 << DESC_BITSHIFT)
-
-struct __attribute__((__packed__)) desc_item_t {
-	s32 nOffsetHigh;
-	u32 nOffsetLow;
-	u32 nSize;
-	u32 nFlags;
-};
 
 void do_test_case_0(struct qvio_device* self) {
 	XAximm_test1* pXaximm_test1 = &self->xaximm_test1;
@@ -251,17 +251,79 @@ ssize_t test_case_store(struct device *dev, struct device_attribute *attr, const
 	return count;
 }
 
+ssize_t zzlab_ver_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct qvio_device* self = dev_get_drvdata(dev);
+	u32 nPlatform = *(u32*)((u8*)self->zzlab_env + 0x14);
+
+	return snprintf(buf, PAGE_SIZE, "0x%08X %c%c%c%c 0x%08X\n",
+		*(u32*)((u8*)self->zzlab_env + 0x10),
+		(char)((nPlatform >> 24) & 0xFF),
+		(char)((nPlatform >> 16) & 0xFF),
+		(char)((nPlatform >> 8) & 0xFF),
+		(char)((nPlatform >> 0) & 0xFF),
+		*(u32*)((u8*)self->zzlab_env + 0x18));
+}
+
+ssize_t zzlab_ticks_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct qvio_device* self = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%u\n",
+		*(u32*)((u8*)self->zzlab_env + 0x1C));
+}
+
 static DEVICE_ATTR(dma_block, 0644, dma_block_show, dma_block_store);
 static DEVICE_ATTR(dma_block_index, 0644, dma_block_index_show, dma_block_index_store);
 static DEVICE_ATTR(test_case, 0644, test_case_show, test_case_store);
+static DEVICE_ATTR(zzlab_ver, 0444, zzlab_ver_show, NULL);
+static DEVICE_ATTR(zzlab_ticks, 0444, zzlab_ticks_show, NULL);
+
+#if 0
+static __poll_t __file_poll(struct file *filp, struct poll_table_struct *wait);
+static ssize_t __file_read(struct file *filp, char *buf, size_t size, loff_t *f_pos);
+#endif
+static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg);
+static long __file_ioctl_g_ticks(struct file * filp, unsigned long arg);
+static long __file_ioctl_s_fmt(struct file * filp, unsigned long arg);
+static long __file_ioctl_g_fmt(struct file * filp, unsigned long arg);
+static long __file_ioctl_qbuf(struct file * filp, unsigned long arg);
+static long __file_ioctl_dqbuf(struct file * filp, unsigned long arg);
 
 static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg) {
 	long ret;
-	struct qvio_device* device = filp->private_data;
-
-	pr_info("device=%p, cmd=%u\n", device, cmd);
 
 	switch(cmd) {
+	case QVIO_IOC_G_TICKS:
+		ret = __file_ioctl_g_ticks(filp, arg);
+		break;
+
+	case QVIO_IOC_S_FMT:
+		ret = __file_ioctl_s_fmt(filp, arg);
+		break;
+
+	case QVIO_IOC_G_FMT:
+		ret = __file_ioctl_g_fmt(filp, arg);
+		break;
+
+	case QVIO_IOC_QBUF:
+		ret = __file_ioctl_qbuf(filp, arg);
+		break;
+
+	case QVIO_IOC_DQBUF:
+		ret = __file_ioctl_dqbuf(filp, arg);
+		break;
+
+#if 0
+	case QVIO_IOC_STREAMON:
+		ret = __file_ioctl_streamon(filp, arg);
+		break;
+
+	case QVIO_IOC_STREAMOFF:
+		ret = __file_ioctl_streamoff(filp, arg);
+		break;
+#endif
+
 	default:
 		pr_err("unexpected, cmd=%d\n", cmd);
 		ret = -EINVAL;
@@ -271,10 +333,144 @@ static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg
 	return ret;
 }
 
+static long __file_ioctl_g_ticks(struct file * filp, unsigned long arg) {
+	int ret;
+	struct qvio_device* self = filp->private_data;
+	struct qvio_g_ticks args;
+
+	args.ticks = *(u32*)((u8*)self->zzlab_env + 0x1C);
+
+	ret = copy_to_user((void __user *)arg, &args, sizeof(args));
+	if (ret != 0) {
+		pr_err("copy_to_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err0;
+	}
+
+err0:
+	return ret;
+}
+
+static long __file_ioctl_s_fmt(struct file * filp, unsigned long arg) {
+	int ret;
+	struct qvio_device* self = filp->private_data;
+	struct qvio_g_fmt args;
+
+	ret = copy_from_user(&args, (void __user *)arg, sizeof(args));
+	if (ret != 0) {
+		pr_err("copy_from_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err0;
+	}
+
+	self->width = args.width;
+	self->height = args.height;
+	self->fmt = args.fmt;
+
+	pr_info("%dx%d 0x%08X\n", self->width, self->height, self->fmt);
+
+err0:
+	return ret;
+}
+
+static long __file_ioctl_g_fmt(struct file * filp, unsigned long arg) {
+	int ret;
+	struct qvio_device* self = filp->private_data;
+	struct qvio_g_fmt args;
+
+	args.width = self->width;
+	args.height = self->height;
+	args.fmt = self->fmt;
+
+	ret = copy_to_user((void __user *)arg, &args, sizeof(args));
+	if (ret != 0) {
+		pr_err("copy_to_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err0;
+	}
+
+err0:
+	return ret;
+}
+
+static long __file_ioctl_qbuf(struct file * filp, unsigned long arg) {
+	struct qvio_device* self = filp->private_data;
+	int ret;
+	unsigned long flags;
+	struct qvio_buf_entry* buf_entry;
+
+	buf_entry = qvio_buf_entry_new();
+	if(! buf_entry) {
+		ret = -ENOMEM;
+		goto err0;
+	}
+
+	ret = copy_from_user(&buf_entry->qbuf, (void __user *)arg, sizeof(buf_entry->qbuf));
+	if (ret != 0) {
+		pr_err("copy_from_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err1;
+	}
+
+	spin_lock_irqsave(&self->job_list_lock, flags);
+	list_add_tail(&buf_entry->node, &self->job_list);
+	spin_unlock_irqrestore(&self->job_list_lock, flags);
+
+	return ret;
+
+err1:
+	qvio_buf_entry_put(buf_entry);
+err0:
+	return ret;
+}
+
+static long __file_ioctl_dqbuf(struct file * filp, unsigned long arg) {
+	struct qvio_device* self = filp->private_data;
+	long ret;
+	unsigned long flags;
+	struct qvio_buf_entry* buf_entry;
+	struct qvio_dqbuf args;
+
+	if(list_empty(&self->done_list)) {
+		ret = -EAGAIN;
+		goto err0;
+	}
+
+	spin_lock_irqsave(&self->done_list_lock, flags);
+	buf_entry = list_first_entry(&self->done_list, struct qvio_buf_entry, node);
+	list_del(&buf_entry->node);
+	spin_unlock_irqrestore(&self->done_list_lock, flags);
+
+	args.cookie = buf_entry->qbuf.cookie;
+	qvio_buf_entry_put(buf_entry);
+
+	ret = copy_to_user((void __user *)arg, &args, sizeof(args));
+	if (ret != 0) {
+		pr_err("copy_to_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err0;
+	}
+
+	return 0;
+
+err0:
+	return ret;
+}
+
 static const struct file_operations __fops = {
 	.owner = THIS_MODULE,
 	.open = qvio_cdev_open,
 	.release = qvio_cdev_release,
+#if 0
+	.read = __file_read,
+	.poll = __file_poll,
+#endif
+	.llseek = noop_llseek,
 	.unlocked_ioctl = __file_ioctl,
 };
 
@@ -702,10 +898,26 @@ static int create_dev_attrs(struct device* dev) {
 		goto err2;
 	}
 
+	err = device_create_file(dev, &dev_attr_zzlab_ver);
+	if (err) {
+		pr_err("device_create_file() failed, err=%d\n", err);
+		goto err3;
+	}
+
+	err = device_create_file(dev, &dev_attr_zzlab_ticks);
+	if (err) {
+		pr_err("device_create_file() failed, err=%d\n", err);
+		goto err4;
+	}
+
 	return 0;
 
-err2:
+err4:
+	device_remove_file(dev, &dev_attr_zzlab_ver);
+err3:
 	device_remove_file(dev, &dev_attr_test_case);
+err2:
+	device_remove_file(dev, &dev_attr_dma_block_index);
 err1:
 	device_remove_file(dev, &dev_attr_dma_block);
 err0:
@@ -713,6 +925,8 @@ err0:
 }
 
 static void remove_dev_attrs(struct device* dev) {
+	device_remove_file(dev, &dev_attr_zzlab_ticks);
+	device_remove_file(dev, &dev_attr_zzlab_ver);
 	device_remove_file(dev, &dev_attr_test_case);
 	device_remove_file(dev, &dev_attr_dma_block_index);
 	device_remove_file(dev, &dev_attr_dma_block);
@@ -800,11 +1014,6 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	self->xaximm_test1.Control_BaseAddress = (u64)self->bar[0] + 0x20000;
 	self->xaximm_test1.IsReady = XIL_COMPONENT_IS_READY;
 	pr_info("xaximm_test1 = %p\n", (void*)self->xaximm_test1.Control_BaseAddress);
-
-	pr_info("Version: %08X %08X %08X\n",
-		*(u32*)((u8*)self->zzlab_env + 0x10),
-		*(u32*)((u8*)self->zzlab_env + 0x14),
-		*(u32*)((u8*)self->zzlab_env + 0x18));
 
 	self->cdev.fops = &__fops;
 	self->cdev.private_data = self;
