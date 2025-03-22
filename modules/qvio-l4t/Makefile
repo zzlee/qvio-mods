@@ -9,7 +9,8 @@ qvio-objs := \
 	device.o \
 	cdev.o \
 	umods.o \
-	buf_entry.o
+	buf_entry.o \
+	dma_block.o
 
 # qvio-objs += \
 # 	video.o \
@@ -25,10 +26,12 @@ ccflags-y += \
 ccflags-y += -I$(src)/../include
 ccflags-y += -I$(src)/../vitis/aximm_test1_v1_0/src
 ccflags-y += -I${src}/../vitis/v_tpg_v8_3/src
+ccflags-y += -I${src}/../vitis/z_frmbuf_writer_v1_0/src
 qvio-objs += ../vitis/aximm_test1_v1_0/src/xaximm_test1.o
 qvio-objs += ../vitis/v_tpg_v8_3/src/xv_tpg.o
 qvio-objs += ../vitis/v_tpg_v8_3/src/xv_tpg_g.o
 qvio-objs += ../vitis/v_tpg_v8_3/src/xv_tpg_sinit.o
+qvio-objs += ../vitis/z_frmbuf_writer_v1_0/src/xz_frmbuf_writer.o
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) $(KARGS) M=$(PWD) modules

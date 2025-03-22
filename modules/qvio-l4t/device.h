@@ -11,13 +11,6 @@
 
 #include "xaximm_test1.h"
 
-struct dma_block_t {
-	size_t size;
-	void *cpu_addr;
-	dma_addr_t dma_handle;
-	gfp_t gfp;
-};
-
 struct qvio_device {
 	struct kref ref;
 
@@ -32,10 +25,11 @@ struct qvio_device {
 	int got_regions;
 	int msi_enabled;
 	int msix_enabled;
-	int irq_lines[32];
+	int irq_lines[8];
 	int irq_counter;
 
 	// DMA block for test
+	struct dma_pool* desc_pool;
 	struct dma_block_t dma_blocks[8];
 
 	// vars for dev-attr
@@ -59,6 +53,13 @@ struct qvio_device {
 	// done list
 	spinlock_t done_list_lock;
 	struct list_head done_list; // qvio_buf_entry
+
+	// irq control
+	u32 done_jobs;
+	atomic_t irq_event;
+	u32 irq_event_count;
+	atomic_t irq_event_data;
+	wait_queue_head_t irq_wait;
 };
 
 struct qvio_device* qvio_device_new(void);

@@ -5,7 +5,7 @@
 // Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 // 
 // ==============================================================
-#ifdef __linux__
+#ifdef __qcap_linux__
 
 /***************************** Include Files *********************************/
 #include "xaximm_test1.h"

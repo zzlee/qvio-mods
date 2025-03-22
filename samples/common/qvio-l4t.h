@@ -152,13 +152,15 @@ struct qvio_g_fmt {
 struct qvio_qbuf {
 	uintptr_t cookie;
 
+	__u16 buf_type; // 1:userptr, 2:fd, 3:offset
 	union {
-		uintptr_t userptr; // User pointer
-		int dmabuf; // DMA-Buf fd
+		unsigned long userptr; // User pointer
+		__s32 fd; // DMA-Buf fd
+		__u32 offset; // memory mapped
 	} u;
 
-	int offset[4]; // multi-planar
-	int stride[4];
+	__u32 offset[4]; // multi-planar
+	__u32 stride[4];
 };
 
 struct qvio_dqbuf {

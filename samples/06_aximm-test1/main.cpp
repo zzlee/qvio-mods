@@ -48,6 +48,10 @@ namespace __06_aximm_test1__ {
 
 		ZzUtils::FreeStack oFreeStack;
 
+		int nWidth;
+		int nHeight;
+		int nStride;
+
 		int fd_qvio;
 		bool bMeasureTicks;
 		ZzUtils::RateCtrl oRateCtrl;
@@ -55,6 +59,7 @@ namespace __06_aximm_test1__ {
 		int64_t last_tick_time;
 		__u32 last_ticks;
 		std::vector<NvBufSurface*> pNVBuf_surfaces;
+		std::vector<uint8_t*> pSysBufs;
 
 		App(int argc, char **argv) : argc(argc), argv(argv) {
 		}
@@ -67,6 +72,10 @@ namespace __06_aximm_test1__ {
 			int64_t now = _clk();
 
 			LOGD("%s::%s", typeid(self_t).name(), __FUNCTION__);
+
+			nWidth = 4096;
+			nHeight = 2160 * 2;
+			nStride = 4096;
 
 			bMeasureTicks = false;
 			oRateCtrl.num = 2 * 1000LL;
@@ -91,12 +100,12 @@ namespace __06_aximm_test1__ {
 
 				NvBufSurfaceCreateParams oNVBufParam;
 				memset(&oNVBufParam, 0, sizeof(oNVBufParam));
-				oNVBufParam.width = 4096;
-				oNVBufParam.height = 2160;
+				oNVBufParam.width = nWidth;
+				oNVBufParam.height = nHeight;
 				oNVBufParam.layout = NVBUF_LAYOUT_PITCH;
 				oNVBufParam.memType = NVBUF_MEM_DEFAULT;
 				oNVBufParam.gpuId = 0;
-				oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_NV12;
+				oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_GRAY8;
 				for(int i = 0;i < pNVBuf_surfaces.size();i++) {
 					err = NvBufSurfaceCreate(&pNVBuf_surfaces[i], 1, &oNVBufParam);
 					if(err) {
@@ -123,6 +132,23 @@ namespace __06_aximm_test1__ {
 							LOGE("%s(%d): NvBufSurfaceDestroy() failed, err=%d", __FUNCTION__, __LINE__, err);
 						}
 					};
+				}
+				if(err < 0)
+					break;
+
+				pSysBufs.resize(4);
+				for(int i = 0;i < pSysBufs.size();i++) {
+					void *memptr;
+					err = posix_memalign(&memptr, 32, nStride * nHeight);
+					if (err) {
+						LOGE("%s(%d): posix_memalign failed, err=%d", __FUNCTION__, __LINE__, err);
+						break;
+					}
+					oFreeStack += [memptr]() {
+						free(memptr);
+					};
+
+					pSysBufs[i] = (uint8_t*)memptr;
 				}
 				if(err < 0)
 					break;
@@ -159,6 +185,22 @@ namespace __06_aximm_test1__ {
 
 						case '3':
 							OnTest3(now);
+							break;
+
+						case '4':
+							OnTest4(now);
+							break;
+
+						case '5':
+							OnTest5(now);
+							break;
+
+						case '6':
+							OnTest6(now);
+							break;
+
+						case '7':
+							OnTest7(now);
 							break;
 						}
 					}
@@ -202,8 +244,8 @@ namespace __06_aximm_test1__ {
 
 			switch(1) { case 1:
 				qvio_s_fmt args;
-				args.width = 4096;
-				args.height = 2160;
+				args.width = nWidth;
+				args.height = nHeight;
 				args.fmt = 0;
 				err = ioctl(fd_qvio, QVIO_IOC_S_FMT, &args);
 				if(err) {
@@ -239,20 +281,290 @@ namespace __06_aximm_test1__ {
 				for(int i = 0;i < pNVBuf_surfaces.size();i++) {
 					NvBufSurfaceParams& surfaceParams = pNVBuf_surfaces[i]->surfaceList[0];
 
+					memset(&args, 0, sizeof(args));
+					args.buf_type = 2;
 					args.cookie = (uintptr_t)i;
-					args.u.dmabuf = (int)surfaceParams.bufferDesc;
+					args.u.fd = (int)surfaceParams.bufferDesc;
 					args.offset[0] = surfaceParams.planeParams.offset[0];
-					args.offset[1] = surfaceParams.planeParams.offset[1];
 					args.stride[0] = surfaceParams.planeParams.pitch[0];
-					args.stride[1] = surfaceParams.planeParams.pitch[1];
 					err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
 					if(err) {
 						err = errno;
 						LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
 						break;
 					}
+
+					LOGD("%d: args.cookie=%d", i, args.cookie);
 				}
 			}
+		}
+
+		void OnTest4(int64_t now) {
+			int err;
+
+			switch(1) { case 1:
+				qvio_qbuf args;
+
+				for(int i = 0;i < pSysBufs.size();i++) {
+					memset(&args, 0, sizeof(args));
+					args.buf_type = 1;
+					args.cookie = (uintptr_t)i;
+					args.u.userptr = (unsigned long)pSysBufs[i];
+					args.offset[0] = 0;
+					args.stride[0] = nStride;
+					err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
+					if(err) {
+						err = errno;
+						LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
+						break;
+					}
+
+					LOGD("%d: args.cookie=%d", i, args.cookie);
+				}
+			}
+		}
+
+		void OnTest5(int64_t now) {
+			int err;
+
+			switch(1) { case 1:
+				{
+					qvio_s_fmt args;
+					args.width = nWidth;
+					args.height = nHeight;
+					args.fmt = 0;
+					err = ioctl(fd_qvio, QVIO_IOC_S_FMT, &args);
+					if(err) {
+						err = errno;
+						LOGE("%s(%d): ioctl(QVIO_IOC_S_FMT) failed, err=%d", __FUNCTION__, __LINE__, err);
+						break;
+					}
+				}
+
+				LOGD("QVIO_IOC_QBUF...");
+				{
+					qvio_qbuf args;
+
+					for(int i = 0;i < pNVBuf_surfaces.size();i++) {
+						NvBufSurfaceParams& surfaceParams = pNVBuf_surfaces[i]->surfaceList[0];
+
+						memset(&args, 0, sizeof(args));
+						args.cookie = (uintptr_t)i;
+						args.buf_type = 2;
+						args.u.fd = (int)surfaceParams.bufferDesc;
+						args.offset[0] = surfaceParams.planeParams.offset[0];
+						args.stride[0] = surfaceParams.planeParams.pitch[0];
+						err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
+						if(err) {
+							err = errno;
+							LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
+							break;
+						}
+
+						LOGD("%d: args.cookie=%d", i, args.cookie);
+					}
+				}
+
+				LOGD("QVIO_IOC_STREAMON...");
+				err = ioctl(fd_qvio, QVIO_IOC_STREAMON);
+				if(err) {
+					err = errno;
+					LOGE("%s(%d): ioctl(QVIO_IOC_STREAMON) failed, err=%d", __FUNCTION__, __LINE__, err);
+					break;
+				}
+
+				int64_t nStartTime = _clk();
+				int nTests = 128;
+				for(int i = 0;i < nTests;i++) {
+					fd_set readfds;
+					FD_ZERO(&readfds);
+
+					int fd_max = -1;
+					if(fd_qvio > fd_max) fd_max = fd_qvio;
+					FD_SET(fd_qvio, &readfds);
+
+					err = select(fd_max + 1, &readfds, NULL, NULL, NULL);
+					if (err < 0) {
+						LOGE("%s(%d): select() failed! err=%d", __FUNCTION__, __LINE__, err);
+						break;
+					}
+
+					if (FD_ISSET(fd_qvio, &readfds)) {
+						uint32_t nEventData;
+						ssize_t ret = read(fd_qvio, &nEventData, sizeof(nEventData));
+						if(ret != sizeof(nEventData)) {
+							LOGE("%s(%d): read() failed, %d ?= %d", __FUNCTION__, __LINE__, ret, sizeof(nEventData));
+							break;
+						}
+
+						// LOGD("%d: QVIO_IOC_DQBUF", i);
+						int nBufIdx;
+						{
+							qvio_dqbuf args;
+
+							err = ioctl(fd_qvio, QVIO_IOC_DQBUF, &args);
+							if(err) {
+								err = errno;
+								LOGE("%s(%d): ioctl(QVIO_IOC_DQBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
+								break;
+							}
+
+							nBufIdx = (int)args.cookie;
+						}
+
+						// LOGD("%d: QVIO_IOC_QBUF, nBufIdx=%d", i, nBufIdx);
+						{
+							qvio_qbuf args;
+
+							NvBufSurfaceParams& surfaceParams = pNVBuf_surfaces[nBufIdx]->surfaceList[0];
+
+							memset(&args, 0, sizeof(args));
+							args.cookie = (uintptr_t)nBufIdx;
+							args.buf_type = 2;
+							args.u.fd = (int)surfaceParams.bufferDesc;
+							args.offset[0] = surfaceParams.planeParams.offset[0];
+							args.stride[0] = surfaceParams.planeParams.pitch[0];
+							err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
+							if(err) {
+								err = errno;
+								LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
+								break;
+							}
+						}
+					}
+				}
+				int64_t nEndTime = _clk();
+				LOGD("%.2f FPS", (nTests * 1000000.0) / (nEndTime - nStartTime));
+
+				LOGD("QVIO_IOC_STREAMOFF...");
+				err = ioctl(fd_qvio, QVIO_IOC_STREAMOFF);
+				if(err) {
+					err = errno;
+					LOGE("%s(%d): ioctl(QVIO_IOC_STREAMOFF) failed, err=%d", __FUNCTION__, __LINE__, err);
+					break;
+				}
+			}
+		}
+
+		void OnTest6(int64_t now) {
+			int err;
+
+			switch(1) { case 1:
+				{
+					qvio_s_fmt args;
+					args.width = nWidth;
+					args.height = nHeight;
+					args.fmt = 0;
+					err = ioctl(fd_qvio, QVIO_IOC_S_FMT, &args);
+					if(err) {
+						err = errno;
+						LOGE("%s(%d): ioctl(QVIO_IOC_S_FMT) failed, err=%d", __FUNCTION__, __LINE__, err);
+						break;
+					}
+				}
+
+				LOGD("QVIO_IOC_QBUF...");
+				{
+					qvio_qbuf args;
+
+					for(int i = 0;i < pSysBufs.size();i++) {
+						memset(&args, 0, sizeof(args));
+						args.cookie = (uintptr_t)i;
+						args.buf_type = 1;
+						args.u.userptr = (unsigned long)pSysBufs[i];
+						args.offset[0] = 0;
+						args.stride[0] = nWidth;
+						err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
+						if(err) {
+							err = errno;
+							LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
+							break;
+						}
+
+						LOGD("%d: args.cookie=%d", i, args.cookie);
+					}
+				}
+
+				LOGD("QVIO_IOC_STREAMON...");
+				err = ioctl(fd_qvio, QVIO_IOC_STREAMON);
+				if(err) {
+					err = errno;
+					LOGE("%s(%d): ioctl(QVIO_IOC_STREAMON) failed, err=%d", __FUNCTION__, __LINE__, err);
+					break;
+				}
+
+				int64_t nStartTime = _clk();
+				int nTests = 128;
+				for(int i = 0;i < nTests;i++) {
+					fd_set readfds;
+					FD_ZERO(&readfds);
+
+					int fd_max = -1;
+					if(fd_qvio > fd_max) fd_max = fd_qvio;
+					FD_SET(fd_qvio, &readfds);
+
+					err = select(fd_max + 1, &readfds, NULL, NULL, NULL);
+					if (err < 0) {
+						LOGE("%s(%d): select() failed! err=%d", __FUNCTION__, __LINE__, err);
+						break;
+					}
+
+					if (FD_ISSET(fd_qvio, &readfds)) {
+						uint32_t nEventData;
+						ssize_t ret = read(fd_qvio, &nEventData, sizeof(nEventData));
+						if(ret != sizeof(nEventData)) {
+							LOGE("%s(%d): read() failed, %d ?= %d", __FUNCTION__, __LINE__, ret, sizeof(nEventData));
+							break;
+						}
+
+						// LOGD("%d: QVIO_IOC_DQBUF", i);
+						int nBufIdx;
+						{
+							qvio_dqbuf args;
+
+							err = ioctl(fd_qvio, QVIO_IOC_DQBUF, &args);
+							if(err) {
+								err = errno;
+								LOGE("%s(%d): ioctl(QVIO_IOC_DQBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
+								break;
+							}
+
+							nBufIdx = (int)args.cookie;
+						}
+
+						// LOGD("%d: QVIO_IOC_QBUF, nBufIdx=%d", i, nBufIdx);
+						{
+							qvio_qbuf args;
+
+							memset(&args, 0, sizeof(args));
+							args.cookie = (uintptr_t)nBufIdx;
+							args.buf_type = 1;
+							args.u.userptr = (uintptr_t)pSysBufs[nBufIdx];
+							args.offset[0] = 0;
+							args.stride[0] = nStride;
+							err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
+							if(err) {
+								err = errno;
+								LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
+								break;
+							}
+						}
+					}
+				}
+				int64_t nEndTime = _clk();
+				LOGD("%.2f FPS", (nTests * 1000000.0) / (nEndTime - nStartTime));
+
+				LOGD("QVIO_IOC_STREAMOFF...");
+				err = ioctl(fd_qvio, QVIO_IOC_STREAMOFF);
+				if(err) {
+					err = errno;
+					LOGE("%s(%d): ioctl(QVIO_IOC_STREAMOFF) failed, err=%d", __FUNCTION__, __LINE__, err);
+					break;
+				}
+			}
+		}
+
+		void OnTest7(int64_t now) {
 		}
 	};
 }

@@ -41,8 +41,41 @@ void qvio_buf_entry_put(struct qvio_buf_entry* self) {
 
 static void __buf_entry_free(struct kref *ref) {
 	struct qvio_buf_entry* self = container_of(ref, struct qvio_buf_entry, ref);
+	int i;
 
 	// pr_info("self=%px\n", self);
+
+	switch(self->qbuf.buf_type) {
+	case 0:
+		break;
+
+	case 1:
+		dma_unmap_sg(self->dev, self->sgt_userptr.sgl, self->sgt_userptr.nents, self->dma_dir);
+		sg_free_table(&self->sgt_userptr);
+		break;
+
+	case 2:
+		if(self->dmabuf) {
+			dma_buf_unmap_attachment(self->attach, self->sgt, self->dma_dir);
+			dma_buf_end_cpu_access(self->dmabuf, self->dma_dir);
+			dma_buf_detach(self->dmabuf, self->attach);
+			dma_buf_put(self->dmabuf);
+		} else {
+			pr_err("unexpected value, self->dmabuf=%p", self->dmabuf);
+		}
+		break;
+
+	default:
+		pr_err("unexpected value, self->qbuf.buf_type=%d", self->qbuf.buf_type);
+		break;
+	}
+
+	for(i = 0;i < ARRAY_SIZE(self->desc_blocks);i++) {
+		if(! self->desc_blocks[i].dma_handle)
+			continue;
+
+		qvio_dma_block_free(&self->desc_blocks[i], self->desc_pool);
+	}
 
 	kfree(self);
 }
