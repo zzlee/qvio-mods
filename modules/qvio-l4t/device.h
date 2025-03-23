@@ -29,6 +29,7 @@ struct qvio_device {
 	int irq_counter;
 
 	// DMA block for test
+	int desc_block_size;
 	struct dma_pool* desc_pool;
 	struct dma_block_t dma_blocks[8];
 

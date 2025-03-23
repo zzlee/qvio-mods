@@ -149,10 +149,16 @@ struct qvio_g_fmt {
 	__u32 fmt; // fourcc
 };
 
+enum qvio_buf_type {
+	QVIO_BUF_TYPE_USERPTR = 1,
+	QVIO_BUF_TYPE_DMABUF,
+	QVIO_BUF_TYPE_MMAP,
+};
+
 struct qvio_qbuf {
 	uintptr_t cookie;
 
-	__u16 buf_type; // 1:userptr, 2:fd, 3:offset
+	__u16 buf_type; // ref to qvio_buf_type
 	union {
 		unsigned long userptr; // User pointer
 		__s32 fd; // DMA-Buf fd
