@@ -501,7 +501,7 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 	sg = sgt->sgl;
 	pDescItem = pDescItems;
 	pDstBase = sg_dma_address(sg);
-	pr_info("pDstBase=%llx\n", pDstBase);
+	// pr_info("pDstBase=%llx\n", pDstBase);
 	for (i = 0; i < sgt->nents && buf_size > 0; i++, sg = sg_next(sg), pDescItem++) {
 		int64_t nDstOffset;
 
@@ -515,7 +515,7 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 		buf_size -= pDescItem->nSize;
 	}
 	nDescItemCount = i;
-	pr_info("nDescItemCount=%d\n", nDescItemCount);
+	// pr_info("nDescItemCount=%d\n", nDescItemCount);
 
 	buf_entry = qvio_buf_entry_new();
 	if(! buf_entry) {
