@@ -501,6 +501,7 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 	sg = sgt->sgl;
 	pDescItem = pDescItems;
 	pDstBase = sg_dma_address(sg);
+	pr_info("pDstBase=%llx\n", pDstBase);
 	for (i = 0; i < sgt->nents && buf_size > 0; i++, sg = sg_next(sg), pDescItem++) {
 		int64_t nDstOffset;
 

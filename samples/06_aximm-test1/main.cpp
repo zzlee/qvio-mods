@@ -442,7 +442,7 @@ namespace __06_aximm_test1__ {
 					}
 				}
 
-#if 0
+#if 1
 				LOGD("Flushing all pending buffers...");
 				while(nQbufs > 0) {
 					fd_set readfds;
