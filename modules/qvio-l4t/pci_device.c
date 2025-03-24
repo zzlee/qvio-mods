@@ -308,6 +308,8 @@ static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg
 static long __file_ioctl_g_ticks(struct file * filp, unsigned long arg);
 static long __file_ioctl_s_fmt(struct file * filp, unsigned long arg);
 static long __file_ioctl_g_fmt(struct file * filp, unsigned long arg);
+static long __file_ioctl_req_bufs(struct file * filp, unsigned long arg);
+static long __file_ioctl_query_buf(struct file * filp, unsigned long arg);
 static long __file_ioctl_qbuf(struct file * filp, unsigned long arg);
 static long __file_ioctl_dqbuf(struct file * filp, unsigned long arg);
 static long __file_ioctl_streamon(struct file * filp, unsigned long arg);
@@ -386,6 +388,14 @@ static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg
 		ret = __file_ioctl_g_fmt(filp, arg);
 		break;
 
+	case QVIO_IOC_REQ_BUFS:
+		ret = __file_ioctl_req_bufs(filp, arg);
+		break;
+
+	case QVIO_IOC_QUERY_BUF:
+		ret = __file_ioctl_query_buf(filp, arg);
+		break;
+
 	case QVIO_IOC_QBUF:
 		ret = __file_ioctl_qbuf(filp, arg);
 		break;
@@ -426,6 +436,8 @@ static long __file_ioctl_g_ticks(struct file * filp, unsigned long arg) {
 		goto err0;
 	}
 
+	return 0;
+
 err0:
 	return ret;
 }
@@ -433,7 +445,7 @@ err0:
 static long __file_ioctl_s_fmt(struct file * filp, unsigned long arg) {
 	long ret;
 	struct qvio_device* self = filp->private_data;
-	struct qvio_g_fmt args;
+	struct qvio_format args;
 
 	ret = copy_from_user(&args, (void __user *)arg, sizeof(args));
 	if (ret != 0) {
@@ -443,11 +455,11 @@ static long __file_ioctl_s_fmt(struct file * filp, unsigned long arg) {
 		goto err0;
 	}
 
-	self->width = args.width;
-	self->height = args.height;
-	self->fmt = args.fmt;
+	self->format = args;
 
-	pr_info("%dx%d 0x%08X\n", self->width, self->height, self->fmt);
+	pr_info("%dx%d 0x%08X\n", self->format.width, self->format.height, self->format.fmt);
+
+	return 0;
 
 err0:
 	return ret;
@@ -456,11 +468,9 @@ err0:
 static long __file_ioctl_g_fmt(struct file * filp, unsigned long arg) {
 	long ret;
 	struct qvio_device* self = filp->private_data;
-	struct qvio_g_fmt args;
+	struct qvio_format args;
 
-	args.width = self->width;
-	args.height = self->height;
-	args.fmt = self->fmt;
+	args = self->format;
 
 	ret = copy_to_user((void __user *)arg, &args, sizeof(args));
 	if (ret != 0) {
@@ -470,14 +480,125 @@ static long __file_ioctl_g_fmt(struct file * filp, unsigned long arg) {
 		goto err0;
 	}
 
+	return 0;
+
 err0:
 	return ret;
 }
 
-static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, struct qvio_buf_entry** ppBufEntry) {
+static long __file_ioctl_req_bufs(struct file * filp, unsigned long arg) {
+	long ret;
+	struct qvio_device* self = filp->private_data;
+	struct qvio_req_bufs args;
+	size_t buf_size;
+	int i;
+	__u32 offset;
+
+	ret = copy_from_user(&args, (void __user *)arg, sizeof(args));
+	if (ret != 0) {
+		pr_err("copy_from_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err0;
+	}
+
+	if(self->buffers) {
+		kfree(self->buffers);
+		self->buffers_count = 0;
+	}
+
+	self->buffers = kcalloc(args.count, sizeof(struct qvio_buffer), GFP_KERNEL);
+	if(! self->buffers) {
+		pr_err("kcalloc() failed\n");
+		goto err0;
+	}
+	self->buffers_count = args.count;
+
+	for(i = 0;i < args.count;i++) {
+		self->buffers[i].index = i;
+		self->buffers[i].buf_type = args.buf_type;
+		memcpy(self->buffers[i].offset, args.offset, ARRAY_SIZE(args.offset));
+		memcpy(self->buffers[i].stride, args.stride, ARRAY_SIZE(args.stride));
+	}
+
+	buf_size = (size_t)(args.stride[0] * self->format.height * args.count); // TODO: must calc by self->fmt
+	pr_info("buf_size=%lu\n", buf_size);
+
+	switch(args.buf_type) {
+	case QVIO_BUF_TYPE_MMAP:
+		if(self->mmap_buffer) vfree(self->mmap_buffer);
+		self->mmap_buffer = vmalloc(buf_size);
+		if(! self->mmap_buffer) {
+			pr_err("vmalloc() failed\n");
+			goto err0;
+		}
+
+		offset = 0;
+		for(i = 0;i < args.count;i++) {
+			self->buffers[i].u.offset = offset;
+
+			offset += args.stride[0] * self->format.height;
+		}
+
+		break;
+
+	case QVIO_BUF_TYPE_DMABUF:
+		break;
+
+	case QVIO_BUF_TYPE_USERPTR:
+		break;
+
+	default:
+		pr_err("unexpected value, args.buf_type=%d\n", (int)args.buf_type);
+		ret = -EINVAL;
+		goto err0;
+	}
+
+	return 0;
+
+err0:
+	return ret;
+}
+
+static long __file_ioctl_query_buf(struct file * filp, unsigned long arg) {
+	long ret;
+	struct qvio_device* self = filp->private_data;
+	struct qvio_buffer args;
+
+	ret = copy_from_user(&args, (void __user *)arg, sizeof(args));
+	if (ret != 0) {
+		pr_err("copy_from_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err0;
+	}
+
+	if(args.index >= self->buffers_count) {
+		pr_err("unexpected value, %u >= %u\n", args.index, self->buffers_count);
+
+		ret = -EINVAL;
+		goto err0;
+	}
+
+	args = self->buffers[args.index];
+
+	ret = copy_to_user((void __user *)arg, &args, sizeof(args));
+	if (ret != 0) {
+		pr_err("copy_to_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err0;
+	}
+
+	return 0;
+
+err0:
+	return ret;
+}
+
+static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, size_t buf_size, struct qvio_buf_entry** ppBufEntry) {
 	int ret;
 	struct desc_item_t* pDescItems;
-	size_t buf_size;
 	struct scatterlist *sg;
 	struct desc_item_t* pDescItem;
 	dma_addr_t pDstBase;
@@ -497,7 +618,6 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 	}
 
 	// build desc items by sgt
-	buf_size = self->width * self->height; // TODO: must calc by self->fmt
 	sg = sgt->sgl;
 	pDescItem = pDescItems;
 	pDstBase = sg_dma_address(sg);
@@ -596,7 +716,7 @@ err0:
 	return ret;
 }
 
-static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_qbuf* qbuf) {
+static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* buf) {
 	struct qvio_device* self = filp->private_data;
 	long ret;
 	unsigned long start;
@@ -606,13 +726,13 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_qbuf* qbuf
 	struct frame_vector *vec;
 	unsigned int flags_vec = FOLL_FORCE | FOLL_WRITE;
 	int nr_pages;
-	struct sg_table sgt;
+	struct sg_table* sgt;
 	enum dma_data_direction dma_dir = DMA_FROM_DEVICE;
 	struct qvio_buf_entry* buf_entry;
 	unsigned long flags;
 
-	start = qbuf->u.userptr;
-	length = (unsigned long)qbuf->stride[0] * self->height;
+	start = buf->u.userptr;
+	length = (unsigned long)buf->stride[0] * self->format.height; // TODO: calc by self->fmt
 	first = start >> PAGE_SHIFT;
 	last = (start + length - 1) >> PAGE_SHIFT;
 	nr = last - first + 1;
@@ -639,227 +759,36 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_qbuf* qbuf
 		goto err2;
 	}
 
-	ret = sg_alloc_table_from_pages(&sgt, frame_vector_pages(vec), nr_pages, 0, length, GFP_KERNEL);
-	if (ret) {
-		pr_err("sg_alloc_table_from_pages() failed, err=%ld\n", ret);
+	sgt = kmalloc(sizeof(struct sg_table), GFP_KERNEL);
+	if (ret < 0) {
+		pr_err("kmalloc() failed, err=%ld\n", ret);
 		goto err2;
 	}
 
-	ret = dma_map_sg(self->dev, sgt.sgl, sgt.nents, dma_dir);
+	ret = sg_alloc_table_from_pages(sgt, frame_vector_pages(vec), nr_pages, 0, length, GFP_KERNEL);
+	if (ret) {
+		pr_err("sg_alloc_table_from_pages() failed, err=%ld\n", ret);
+		goto err3;
+	}
+
+	ret = dma_map_sg(self->dev, sgt->sgl, sgt->nents, dma_dir);
 	if (ret <= 0) {
 		pr_err("dma_map_sg() failed, err=%ld\n", ret);
 		ret = -EPERM;
-		goto err3;
-	}
-
-	// sgt_dump(&sgt, true);
-
-	ret = buf_entry_from_sgt(self, &sgt, &buf_entry);
-	if (ret) {
-		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
 		goto err4;
-	}
-
-	buf_entry->qbuf = *qbuf;
-	buf_entry->sgt_userptr = sgt;
-	buf_entry->dma_dir = dma_dir;
-
-	spin_lock_irqsave(&self->job_list_lock, flags);
-	list_add_tail(&buf_entry->node, &self->job_list);
-	spin_unlock_irqrestore(&self->job_list_lock, flags);
-
-	return 0;
-
-err4:
-	dma_unmap_sg(self->dev, sgt.sgl, sgt.nents, dma_dir);
-err3:
-	sg_free_table(&sgt);
-err2:
-	put_vaddr_frames(vec);
-err1:
-	frame_vector_destroy(vec);
-err0:
-	return ret;
-}
-
-static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_qbuf* qbuf) {
-	struct qvio_device* self = filp->private_data;
-	long ret;
-	struct dma_buf *dmabuf;
-	struct dma_buf_attachment *attach;
-	struct sg_table *sgt;
-	enum dma_data_direction dma_dir = DMA_FROM_DEVICE;
-	struct qvio_buf_entry* buf_entry;
-	unsigned long flags;
-
-	dmabuf = dma_buf_get(qbuf->u.fd);
-	if (IS_ERR(dmabuf)) {
-		pr_err("dma_buf_get() failed, dmabuf=%p\n", dmabuf);
-
-		ret = -EINVAL;
-		goto err0;
-	}
-	// pr_info("dmabuf->size=%d\n", (int)dmabuf->size);
-
-	attach = dma_buf_attach(dmabuf, self->dev);
-	if (IS_ERR(attach)) {
-		pr_err("dma_buf_attach() failed, attach=%p\n", attach);
-
-		ret = -EINVAL;
-		goto err1;
-	}
-	// pr_info("attach=%p\n", attach);
-
-	ret = dma_buf_begin_cpu_access(dmabuf, dma_dir);
-	if (IS_ERR(attach)) {
-		pr_err("dma_buf_begin_cpu_access() failed, attach=%p\n", attach);
-		goto err2;
-	}
-
-	sgt = dma_buf_map_attachment(attach, dma_dir);
-	if (IS_ERR(sgt)) {
-		pr_err("dma_buf_map_attachment() failed, sgt=%p\n", sgt);
-
-		ret = -EINVAL;
-		goto err3;
-	}
-
-	// sgt_dump(&sgt, true);
-
-	ret = buf_entry_from_sgt(self, sgt, &buf_entry);
-	if (ret) {
-		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
-		goto err4;
-	}
-
-	buf_entry->qbuf = *qbuf;
-	buf_entry->dmabuf = dmabuf;
-	buf_entry->attach = attach;
-	buf_entry->sgt = sgt;
-	buf_entry->dma_dir = dma_dir;
-
-	spin_lock_irqsave(&self->job_list_lock, flags);
-	list_add_tail(&buf_entry->node, &self->job_list);
-	spin_unlock_irqrestore(&self->job_list_lock, flags);
-
-	return 0;
-
-err4:
-	dma_buf_unmap_attachment(attach, sgt, dma_dir);
-err3:
-	dma_buf_end_cpu_access(dmabuf, dma_dir);
-err2:
-	dma_buf_detach(dmabuf, attach);
-err1:
-	dma_buf_put(dmabuf);
-err0:
-	return ret;
-}
-
-#if 0
-static long __file_ioctl_qbuf_dmabuf1(struct file * filp, struct qvio_qbuf* qbuf) {
-	struct qvio_device* self = filp->private_data;
-	long ret;
-	struct dma_buf *dmabuf;
-	struct dma_buf_attachment *attach;
-	struct sg_table *sgt;
-	struct qvio_buf_entry* buf_entry;
-	struct scatterlist *sg;
-	enum dma_data_direction dma_dir = DMA_FROM_DEVICE;
-	unsigned long flags;
-	int i;
-	size_t buf_size;
-	struct desc_item_t* pDescItem;
-	int64_t nDstOffset;
-
-	dmabuf = dma_buf_get(qbuf->u.fd);
-	if (IS_ERR(dmabuf)) {
-		pr_err("dma_buf_get() failed, dmabuf=%p\n", dmabuf);
-
-		ret = -EINVAL;
-		goto err0;
-	}
-	// pr_info("dmabuf->size=%d\n", (int)dmabuf->size);
-
-	attach = dma_buf_attach(dmabuf, self->dev);
-	if (IS_ERR(attach)) {
-		pr_err("dma_buf_attach() failed, attach=%p\n", attach);
-
-		ret = -EINVAL;
-		goto err1;
-	}
-	// pr_info("attach=%p\n", attach);
-
-	ret = dma_buf_begin_cpu_access(dmabuf, dma_dir);
-	if (IS_ERR(attach)) {
-		pr_err("dma_buf_begin_cpu_access() failed, attach=%p\n", attach);
-		goto err2;
-	}
-
-	sgt = dma_buf_map_attachment(attach, dma_dir);
-	if (IS_ERR(sgt)) {
-		pr_err("dma_buf_map_attachment() failed, sgt=%p\n", sgt);
-
-		ret = -EINVAL;
-		goto err3;
 	}
 
 	// sgt_dump(sgt, true);
 
-	buf_entry = qvio_buf_entry_new();
-	if(! buf_entry) {
-		ret = -ENOMEM;
-		goto err4;
-	}
-
-	buf_entry->desc_pool = self->desc_pool;
-	buf_size = self->width * self->height; // TODO: must calc by self->fmt
-	ret = qvio_dma_block_alloc(&buf_entry->desc_blocks[0], buf_entry->desc_pool, GFP_KERNEL | GFP_DMA);
-	if(ret) {
-		pr_err("qvio_dma_block_alloc() failed, ret=%ld\n", ret);
+	ret = buf_entry_from_sgt(self, sgt, (size_t)length, &buf_entry);
+	if (ret) {
+		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
 		goto err5;
 	}
 
-	if((sgt->orig_nents << DESC_BITSHIFT) > PAGE_SIZE) {
-		pr_err("unexpected!! sgt->orig_nents=%d\n", (int)sgt->orig_nents);
-		goto err5;
-	}
-
-	pDescItem = buf_entry->desc_blocks[0].cpu_addr;
-	buf_entry->desc_dma_handle = buf_entry->desc_blocks[0].dma_handle;
-
-	sg = sgt->sgl;
-	for (i = 0; i < sgt->orig_nents && buf_size > 0; i++, sg = sg_next(sg)) {
-		if(i == 0) {
-			buf_entry->dst_dma_handle = sg_dma_address(sg);
-		}
-
-		nDstOffset = sg_dma_address(sg) - buf_entry->dst_dma_handle;
-		pDescItem->nOffsetHigh = ((nDstOffset >> 32) & 0xFFFFFFFF);
-		pDescItem->nOffsetLow = (nDstOffset & 0xFFFFFFFF);
-		pDescItem->nSize = min(buf_size, (size_t)sg_dma_len(sg));
-		pDescItem->nFlags = 0;
-		// pr_info("%d: (%08X %08X) %08X %08X, buf_size=%u\n", i, pDescItem->nOffsetHigh, pDescItem->nOffsetLow, pDescItem->nSize, pDescItem->nFlags, buf_size);
-
-		buf_entry->desc_items++;
-		buf_size -= pDescItem->nSize;
-
-		pDescItem++;
-	}
-
-	// end of desc items
-	pDescItem->nOffsetHigh = 0;
-	pDescItem->nOffsetLow = 0;
-	pDescItem->nSize = 0;
-	pDescItem->nFlags = 0;
-
-	dma_sync_single_for_device(self->dev, buf_entry->desc_blocks[0].dma_handle, PAGE_SIZE, DMA_TO_DEVICE);
-
-	buf_entry->qbuf = *qbuf;
-	buf_entry->dmabuf = dmabuf;
-	buf_entry->attach = attach;
-	buf_entry->sgt = sgt;
+	buf_entry->buf = *buf;
 	buf_entry->dma_dir = dma_dir;
+	buf_entry->u.userptr.sgt = sgt;
 
 	spin_lock_irqsave(&self->job_list_lock, flags);
 	list_add_tail(&buf_entry->node, &self->job_list);
@@ -868,7 +797,83 @@ static long __file_ioctl_qbuf_dmabuf1(struct file * filp, struct qvio_qbuf* qbuf
 	return 0;
 
 err5:
-	qvio_buf_entry_put(buf_entry);
+	dma_unmap_sg(self->dev, sgt->sgl, sgt->nents, dma_dir);
+err4:
+	sg_free_table(sgt);
+err3:
+	kfree(sgt);
+err2:
+	put_vaddr_frames(vec);
+err1:
+	frame_vector_destroy(vec);
+err0:
+	return ret;
+}
+
+static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf) {
+	struct qvio_device* self = filp->private_data;
+	long ret;
+	struct dma_buf *dmabuf;
+	struct dma_buf_attachment *attach;
+	struct sg_table *sgt;
+	enum dma_data_direction dma_dir = DMA_FROM_DEVICE;
+	size_t buf_size;
+	struct qvio_buf_entry* buf_entry;
+	unsigned long flags;
+
+	dmabuf = dma_buf_get(buf->u.fd);
+	if (IS_ERR(dmabuf)) {
+		pr_err("dma_buf_get() failed, dmabuf=%p\n", dmabuf);
+
+		ret = -EINVAL;
+		goto err0;
+	}
+	// pr_info("dmabuf->size=%d\n", (int)dmabuf->size);
+
+	attach = dma_buf_attach(dmabuf, self->dev);
+	if (IS_ERR(attach)) {
+		pr_err("dma_buf_attach() failed, attach=%p\n", attach);
+
+		ret = -EINVAL;
+		goto err1;
+	}
+	// pr_info("attach=%p\n", attach);
+
+	ret = dma_buf_begin_cpu_access(dmabuf, dma_dir);
+	if (IS_ERR(attach)) {
+		pr_err("dma_buf_begin_cpu_access() failed, attach=%p\n", attach);
+		goto err2;
+	}
+
+	sgt = dma_buf_map_attachment(attach, dma_dir);
+	if (IS_ERR(sgt)) {
+		pr_err("dma_buf_map_attachment() failed, sgt=%p\n", sgt);
+
+		ret = -EINVAL;
+		goto err3;
+	}
+
+	// sgt_dump(&sgt, true);
+
+	buf_size = (size_t)(buf->stride[0] * self->format.height); // TODO: calc by self->fmt
+	ret = buf_entry_from_sgt(self, sgt, buf_size, &buf_entry);
+	if (ret) {
+		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
+		goto err4;
+	}
+
+	buf_entry->buf = *buf;
+	buf_entry->dma_dir = dma_dir;
+	buf_entry->u.dmabuf.dmabuf = dmabuf;
+	buf_entry->u.dmabuf.attach = attach;
+	buf_entry->u.dmabuf.sgt = sgt;
+
+	spin_lock_irqsave(&self->job_list_lock, flags);
+	list_add_tail(&buf_entry->node, &self->job_list);
+	spin_unlock_irqrestore(&self->job_list_lock, flags);
+
+	return 0;
+
 err4:
 	dma_buf_unmap_attachment(attach, sgt, dma_dir);
 err3:
@@ -880,13 +885,98 @@ err1:
 err0:
 	return ret;
 }
-#endif
+
+static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) {
+	struct qvio_device* self = filp->private_data;
+	long ret;
+	size_t buf_size;
+	void* vaddr;
+	unsigned long nr_pages;
+	struct page **pages;
+	unsigned long i;
+	struct sg_table* sgt;
+	enum dma_data_direction dma_dir = DMA_FROM_DEVICE;
+	struct qvio_buf_entry* buf_entry;
+	unsigned long flags;
+
+	buf_size = (size_t)(buf->stride[0] * self->format.height); // TODO: calc by self->fmt
+	// pr_info("buf_size=%lu\n", buf_size);
+
+	vaddr = (uint8_t*)self->mmap_buffer + buf->u.offset;
+	// pr_info("vaddr=%llX\n", (int64_t)vaddr);
+
+	nr_pages = (buf_size + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	// pr_info("nr_pages=%lu\n", nr_pages);
+
+	pages = kmalloc(sizeof(struct page *) * nr_pages, GFP_KERNEL);
+	if (!pages) {
+		pr_err("kmalloc() failed\n");
+		goto err0;
+	}
+
+	for (i = 0; i < nr_pages; i++) {
+		pages[i] = vmalloc_to_page(vaddr + (i << PAGE_SHIFT));
+		if (!pages[i]) {
+			pr_err("vmalloc_to_page() failed\n");
+			goto err1;
+		}
+	}
+
+	sgt = kmalloc(sizeof(struct sg_table), GFP_KERNEL);
+	if (ret) {
+		pr_err("kmalloc() failed, err=%ld\n", ret);
+		goto err1;
+	}
+
+	ret = sg_alloc_table_from_pages(sgt, pages, nr_pages, 0, buf_size, GFP_KERNEL);
+	if (ret) {
+		pr_err("sg_alloc_table_from_pages() failed, err=%ld\n", ret);
+		goto err2;
+	}
+
+	ret = dma_map_sg(self->dev, sgt->sgl, sgt->nents, dma_dir);
+	if (ret <= 0) {
+		pr_err("dma_map_sg() failed, err=%ld\n", ret);
+		goto err3;
+	}
+
+	// sgt_dump(sgt, true);
+
+	ret = buf_entry_from_sgt(self, sgt, buf_size, &buf_entry);
+	if (ret) {
+		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
+		goto err4;
+	}
+
+	buf_entry->buf = *buf;
+	buf_entry->dma_dir = dma_dir;
+	buf_entry->u.userptr.sgt = sgt;
+
+	spin_lock_irqsave(&self->job_list_lock, flags);
+	list_add_tail(&buf_entry->node, &self->job_list);
+	spin_unlock_irqrestore(&self->job_list_lock, flags);
+
+	kfree(pages);
+
+	return 0;
+
+err4:
+	dma_unmap_sg(self->dev, sgt->sgl, sgt->nents, dma_dir);
+err3:
+	sg_free_table(sgt);
+err2:
+	kfree(sgt);
+err1:
+	kfree(pages);
+err0:
+	return ret;
+}
 
 static long __file_ioctl_qbuf(struct file * filp, unsigned long arg) {
 	long ret;
-	struct qvio_qbuf qbuf;
+	struct qvio_buffer buf;
 
-	ret = copy_from_user(&qbuf, (void __user *)arg, sizeof(qbuf));
+	ret = copy_from_user(&buf, (void __user *)arg, sizeof(buf));
 	if (ret != 0) {
 		pr_err("copy_from_user() failed, err=%d\n", (int)ret);
 
@@ -894,17 +984,21 @@ static long __file_ioctl_qbuf(struct file * filp, unsigned long arg) {
 		goto err0;
 	}
 
-	switch(qbuf.buf_type) {
+	switch(buf.buf_type) {
 	case QVIO_BUF_TYPE_USERPTR:
-		ret = __file_ioctl_qbuf_userptr(filp, &qbuf);
+		ret = __file_ioctl_qbuf_userptr(filp, &buf);
 		break;
 
 	case QVIO_BUF_TYPE_DMABUF:
-		ret = __file_ioctl_qbuf_dmabuf(filp, &qbuf);
+		ret = __file_ioctl_qbuf_dmabuf(filp, &buf);
+		break;
+
+	case QVIO_BUF_TYPE_MMAP:
+		ret = __file_ioctl_qbuf_mmap(filp, &buf);
 		break;
 
 	default:
-		pr_err("unexpected value, qbuf.buf_type=%d\n", qbuf.buf_type);
+		pr_err("unexpected value, buf.buf_type=%d\n", buf.buf_type);
 		ret = -EINVAL;
 		break;
 	}
@@ -920,7 +1014,7 @@ static long __file_ioctl_dqbuf(struct file * filp, unsigned long arg) {
 	long ret;
 	unsigned long flags;
 	struct qvio_buf_entry* buf_entry;
-	struct qvio_dqbuf args;
+	struct qvio_buffer args;
 
 	if(list_empty(&self->done_list)) {
 		ret = -EAGAIN;
@@ -932,8 +1026,8 @@ static long __file_ioctl_dqbuf(struct file * filp, unsigned long arg) {
 	list_del(&buf_entry->node);
 	spin_unlock_irqrestore(&self->done_list_lock, flags);
 
-	// pr_info("buf_entry->qbuf.cookie=0x%llX\n", (int64_t)buf_entry->qbuf.cookie);
-	args.cookie = buf_entry->qbuf.cookie;
+	// pr_info("buf_entry->buf.index=0x%llX\n", (int64_t)buf_entry->buf.index);
+	args.index = buf_entry->buf.index;
 
 	qvio_buf_entry_put(buf_entry);
 
@@ -997,15 +1091,15 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		(int64_t)buf_entry->desc_dma_handle,
 		buf_entry->desc_items,
 		(int64_t)buf_entry->dst_dma_handle,
-		buf_entry->qbuf.stride[0]);
+		buf_entry->buf.stride[0]);
 #endif
 
 	XAximm_test1_Set_pDescItem(pXaximm_test1, buf_entry->desc_dma_handle);
 	XAximm_test1_Set_nDescItemCount(pXaximm_test1, buf_entry->desc_items);
 	XAximm_test1_Set_pDstPxl(pXaximm_test1, buf_entry->dst_dma_handle);
-	XAximm_test1_Set_nDstPxlStride(pXaximm_test1, buf_entry->qbuf.stride[0]);
-	XAximm_test1_Set_nWidth(pXaximm_test1, self->width);
-	XAximm_test1_Set_nHeight(pXaximm_test1, self->height);
+	XAximm_test1_Set_nDstPxlStride(pXaximm_test1, buf_entry->buf.stride[0]);
+	XAximm_test1_Set_nWidth(pXaximm_test1, self->format.width);
+	XAximm_test1_Set_nHeight(pXaximm_test1, self->format.height);
 
 	XAximm_test1_Start(pXaximm_test1);
 	pr_info("XAximm_test1_Start()...\n");
@@ -1383,7 +1477,7 @@ static irqreturn_t __irq_handler_0(int irq, void *dev_id)
 			XAximm_test1_Set_pDescItem(pXaximm_test1, next_entry->desc_dma_handle);
 			XAximm_test1_Set_nDescItemCount(pXaximm_test1, next_entry->desc_items);
 			XAximm_test1_Set_pDstPxl(pXaximm_test1, next_entry->dst_dma_handle);
-			XAximm_test1_Set_nDstPxlStride(pXaximm_test1, next_entry->qbuf.stride[0]);
+			XAximm_test1_Set_nDstPxlStride(pXaximm_test1, next_entry->buf.stride[0]);
 			XAximm_test1_Start(pXaximm_test1);
 		} else {
 			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);

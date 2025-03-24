@@ -45,28 +45,32 @@ static void __buf_entry_free(struct kref *ref) {
 
 	// pr_info("self=%px\n", self);
 
-	switch(self->qbuf.buf_type) {
-	case 0:
+	switch(self->buf.buf_type) {
+	case QVIO_BUF_TYPE_MMAP:
+		dma_unmap_sg(self->dev, self->u.mmap.sgt->sgl, self->u.mmap.sgt->nents, self->dma_dir);
+		sg_free_table(self->u.mmap.sgt);
+		kfree(self->u.mmap.sgt);
 		break;
 
-	case 1:
-		dma_unmap_sg(self->dev, self->sgt_userptr.sgl, self->sgt_userptr.nents, self->dma_dir);
-		sg_free_table(&self->sgt_userptr);
+	case QVIO_BUF_TYPE_USERPTR:
+		dma_unmap_sg(self->dev, self->u.userptr.sgt->sgl, self->u.userptr.sgt->nents, self->dma_dir);
+		sg_free_table(self->u.userptr.sgt);
+		kfree(self->u.userptr.sgt);
 		break;
 
-	case 2:
-		if(self->dmabuf) {
-			dma_buf_unmap_attachment(self->attach, self->sgt, self->dma_dir);
-			dma_buf_end_cpu_access(self->dmabuf, self->dma_dir);
-			dma_buf_detach(self->dmabuf, self->attach);
-			dma_buf_put(self->dmabuf);
+	case QVIO_BUF_TYPE_DMABUF:
+		if(self->u.dmabuf.dmabuf) {
+			dma_buf_unmap_attachment(self->u.dmabuf.attach, self->u.dmabuf.sgt, self->dma_dir);
+			dma_buf_end_cpu_access(self->u.dmabuf.dmabuf, self->dma_dir);
+			dma_buf_detach(self->u.dmabuf.dmabuf, self->u.dmabuf.attach);
+			dma_buf_put(self->u.dmabuf.dmabuf);
 		} else {
-			pr_err("unexpected value, self->dmabuf=%p", self->dmabuf);
+			pr_err("unexpected value, self->u.dmabuf.dmabuf=%p", self->u.dmabuf.dmabuf);
 		}
 		break;
 
 	default:
-		pr_err("unexpected value, self->qbuf.buf_type=%d", self->qbuf.buf_type);
+		pr_err("unexpected value, self->buf.buf_type=%d", self->buf.buf_type);
 		break;
 	}
 

@@ -10,21 +10,30 @@
 struct qvio_buf_entry {
 	struct kref ref;
 	struct list_head node;
-	struct qvio_qbuf qbuf;
+	struct qvio_buffer buf;
 
-	// vars for dma-buf
-	struct dma_buf *dmabuf;
-	struct dma_buf_attachment *attach;
-	struct sg_table *sgt;
+	struct device* dev;
 	enum dma_data_direction dma_dir;
 
-	// vars for userptr
-	struct device* dev;
-	struct sg_table sgt_userptr;
+	union {
+		struct {
+			struct dma_buf *dmabuf;
+			struct dma_buf_attachment *attach;
+			struct sg_table *sgt;
+		} dmabuf;
+
+		struct {
+			struct sg_table* sgt;
+		} userptr;
+
+		struct {
+			struct sg_table* sgt;
+		} mmap;
+	} u;
 
 	// vars for descriptors building
 	struct dma_pool* desc_pool;
-	struct dma_block_t desc_blocks[32];
+	struct dma_block_t desc_blocks[8];
 	dma_addr_t desc_dma_handle;
 	u32 desc_items;
 	dma_addr_t dst_dma_handle;

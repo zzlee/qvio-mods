@@ -137,13 +137,7 @@ struct qvio_g_ticks {
 	__u32 ticks;
 };
 
-struct qvio_s_fmt {
-	__u32 width;
-	__u32 height;
-	__u32 fmt; // fourcc
-};
-
-struct qvio_g_fmt {
+struct qvio_format {
 	__u32 width;
 	__u32 height;
 	__u32 fmt; // fourcc
@@ -155,22 +149,27 @@ enum qvio_buf_type {
 	QVIO_BUF_TYPE_MMAP,
 };
 
-struct qvio_qbuf {
-	uintptr_t cookie;
+struct qvio_buffer {
+	__u32 index;
 
 	__u16 buf_type; // ref to qvio_buf_type
 	union {
-		unsigned long userptr; // User pointer
-		__s32 fd; // DMA-Buf fd
-		__u32 offset; // memory mapped
+		unsigned long userptr;
+		__s32 fd;
+		__u32 offset;
 	} u;
 
-	__u32 offset[4]; // multi-planar
+	__u32 offset[4];
 	__u32 stride[4];
 };
 
-struct qvio_dqbuf {
-	uintptr_t cookie;
+struct qvio_req_bufs {
+	__u32 count;
+
+	__u16 buf_type; // ref to qvio_buf_type
+
+	__u32 offset[4];
+	__u32 stride[4];
 };
 
 #define QVIO_IOC_MAGIC		'Q'
@@ -186,11 +185,13 @@ struct qvio_dqbuf {
 
 // qvio ioctls
 #define QVIO_IOC_G_TICKS		_IOR (QVIO_IOC_MAGIC, 0x1, struct qvio_g_ticks)
-#define QVIO_IOC_S_FMT			_IOW (QVIO_IOC_MAGIC, 0x2, struct qvio_s_fmt)
-#define QVIO_IOC_G_FMT			_IOR (QVIO_IOC_MAGIC, 0x2, struct qvio_g_fmt)
-#define QVIO_IOC_QBUF			_IOWR(QVIO_IOC_MAGIC, 0x3, struct qvio_qbuf)
-#define QVIO_IOC_DQBUF			_IOWR(QVIO_IOC_MAGIC, 0x4, struct qvio_dqbuf)
-#define QVIO_IOC_STREAMON		_IO  (QVIO_IOC_MAGIC, 0x5)
-#define QVIO_IOC_STREAMOFF		_IO  (QVIO_IOC_MAGIC, 0x6)
+#define QVIO_IOC_S_FMT			_IOW (QVIO_IOC_MAGIC, 0x2, struct qvio_format)
+#define QVIO_IOC_G_FMT			_IOR (QVIO_IOC_MAGIC, 0x2, struct qvio_format)
+#define QVIO_IOC_REQ_BUFS		_IOWR(QVIO_IOC_MAGIC, 0x3, struct qvio_req_bufs)
+#define QVIO_IOC_QUERY_BUF		_IOWR(QVIO_IOC_MAGIC, 0x4, struct qvio_buffer)
+#define QVIO_IOC_QBUF			_IOWR(QVIO_IOC_MAGIC, 0x5, struct qvio_buffer)
+#define QVIO_IOC_DQBUF			_IOWR(QVIO_IOC_MAGIC, 0x6, struct qvio_buffer)
+#define QVIO_IOC_STREAMON		_IO  (QVIO_IOC_MAGIC, 0x7)
+#define QVIO_IOC_STREAMOFF		_IO  (QVIO_IOC_MAGIC, 0x8)
 
 #endif /* _UAPI_LINUX_QVIO_L4T_H */

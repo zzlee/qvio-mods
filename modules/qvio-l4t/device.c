@@ -66,6 +66,12 @@ static void __device_free(struct kref *ref)
 		}
 	}
 
+	if(self->buffers)
+		kfree(self->buffers);
+
+	if(self->mmap_buffer)
+		vfree(self->mmap_buffer);
+
 	kfree(self);
 }
 

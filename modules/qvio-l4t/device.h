@@ -43,9 +43,11 @@ struct qvio_device {
 	// IP cores
 	XAximm_test1 xaximm_test1;
 	void __iomem * zzlab_env;
-	u32 width;
-	u32 height;
-	u32 fmt; // fourcc
+
+	struct qvio_format format;
+	__u32 buffers_count;
+	struct qvio_buffer* buffers;
+	void* mmap_buffer;
 
 	// job list
 	spinlock_t job_list_lock;
