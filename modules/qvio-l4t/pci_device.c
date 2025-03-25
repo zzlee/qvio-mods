@@ -303,7 +303,6 @@ static DEVICE_ATTR(zzlab_ver, 0444, zzlab_ver_show, NULL);
 static DEVICE_ATTR(zzlab_ticks, 0444, zzlab_ticks_show, NULL);
 
 static __poll_t __file_poll(struct file *filp, struct poll_table_struct *wait);
-static ssize_t __file_read(struct file *filp, char *buf, size_t size, loff_t *f_pos);
 static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg);
 static long __file_ioctl_g_ticks(struct file * filp, unsigned long arg);
 static long __file_ioctl_s_fmt(struct file * filp, unsigned long arg);
@@ -324,52 +323,6 @@ static __poll_t __file_poll(struct file *filp, struct poll_table_struct *wait) {
 		return EPOLLIN | EPOLLRDNORM;
 
 	return 0;
-}
-
-static ssize_t __file_read(struct file *filp, char *buf, size_t size, loff_t *f_pos) {
-	struct qvio_device* self = filp->private_data;
-	DECLARE_WAITQUEUE(wait, current);
-	ssize_t ret = 0;
-	u32 event_count;
-	u32 event_data;
-
-	if (size != sizeof(u32))
-		return -EINVAL;
-
-	add_wait_queue(&self->irq_wait, &wait);
-
-	do {
-		set_current_state(TASK_INTERRUPTIBLE);
-
-		event_count = atomic_read(&self->irq_event);
-		if (event_count != self->irq_event_count) {
-			__set_current_state(TASK_RUNNING);
-			event_data = atomic_read(&self->irq_event_data);
-			if (copy_to_user(buf, &event_data, size)) {
-				ret = -EFAULT;
-			} else {
-				self->irq_event_count = event_count;
-				ret = size;
-			}
-			break;
-		}
-
-		if (filp->f_flags & O_NONBLOCK) {
-			ret = -EAGAIN;
-			break;
-		}
-
-		if (signal_pending(current)) {
-			ret = -ERESTARTSYS;
-			break;
-		}
-		schedule();
-	} while (1);
-
-	__set_current_state(TASK_RUNNING);
-	remove_wait_queue(&self->irq_wait, &wait);
-
-	return ret;
 }
 
 static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg) {
@@ -790,9 +743,9 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 	buf_entry->dma_dir = dma_dir;
 	buf_entry->u.userptr.sgt = sgt;
 
-	spin_lock_irqsave(&self->job_list_lock, flags);
+	spin_lock_irqsave(&self->lock, flags);
 	list_add_tail(&buf_entry->node, &self->job_list);
-	spin_unlock_irqrestore(&self->job_list_lock, flags);
+	spin_unlock_irqrestore(&self->lock, flags);
 
 	return 0;
 
@@ -868,9 +821,9 @@ static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf
 	buf_entry->u.dmabuf.attach = attach;
 	buf_entry->u.dmabuf.sgt = sgt;
 
-	spin_lock_irqsave(&self->job_list_lock, flags);
+	spin_lock_irqsave(&self->lock, flags);
 	list_add_tail(&buf_entry->node, &self->job_list);
-	spin_unlock_irqrestore(&self->job_list_lock, flags);
+	spin_unlock_irqrestore(&self->lock, flags);
 
 	return 0;
 
@@ -952,9 +905,9 @@ static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) 
 	buf_entry->dma_dir = dma_dir;
 	buf_entry->u.userptr.sgt = sgt;
 
-	spin_lock_irqsave(&self->job_list_lock, flags);
+	spin_lock_irqsave(&self->lock, flags);
 	list_add_tail(&buf_entry->node, &self->job_list);
-	spin_unlock_irqrestore(&self->job_list_lock, flags);
+	spin_unlock_irqrestore(&self->lock, flags);
 
 	kfree(pages);
 
@@ -1012,19 +965,28 @@ err0:
 static long __file_ioctl_dqbuf(struct file * filp, unsigned long arg) {
 	struct qvio_device* self = filp->private_data;
 	long ret;
+	u32 event_count;
 	unsigned long flags;
 	struct qvio_buf_entry* buf_entry;
 	struct qvio_buffer args;
+
+	event_count = atomic_read(&self->irq_event);
+	if (event_count == self->irq_event_count) {
+		ret = -EAGAIN;
+		goto err0;
+	}
 
 	if(list_empty(&self->done_list)) {
 		ret = -EAGAIN;
 		goto err0;
 	}
 
-	spin_lock_irqsave(&self->done_list_lock, flags);
+	self->irq_event_count = event_count;
+
+	spin_lock_irqsave(&self->lock, flags);
 	buf_entry = list_first_entry(&self->done_list, struct qvio_buf_entry, node);
 	list_del(&buf_entry->node);
-	spin_unlock_irqrestore(&self->done_list_lock, flags);
+	spin_unlock_irqrestore(&self->lock, flags);
 
 	// pr_info("buf_entry->buf.index=0x%llX\n", (int64_t)buf_entry->buf.index);
 	args.index = buf_entry->buf.index;
@@ -1165,7 +1127,6 @@ static const struct file_operations __fops = {
 	.owner = THIS_MODULE,
 	.open = qvio_cdev_open,
 	.release = qvio_cdev_release,
-	.read = __file_read,
 	.poll = __file_poll,
 	.llseek = noop_llseek,
 	.unlocked_ioctl = __file_ioctl,
@@ -1440,17 +1401,15 @@ static irqreturn_t __irq_handler_0(int irq, void *dev_id)
 		}
 
 		// move job from job_list to done_list
-		spin_lock(&self->job_list_lock);
+		spin_lock(&self->lock);
 		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
 		list_del(&done_entry->node);
 		// try pick next job
 		next_entry = list_empty(&self->job_list) ? NULL :
 			list_first_entry(&self->job_list, struct qvio_buf_entry, node);
-		spin_unlock(&self->job_list_lock);
 
-		spin_lock(&self->done_list_lock);
 		list_add_tail(&done_entry->node, &self->done_list);
-		spin_unlock(&self->done_list_lock);
+		spin_unlock(&self->lock);
 
 		// job done wake up
 		atomic_set(&self->irq_event_data, self->done_jobs++);

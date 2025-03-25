@@ -237,6 +237,11 @@ namespace __06_aximm_test1__ {
 							}
 							break;
 
+						case 's':
+						case 'S':
+							OnSnapshot(now);
+							break;
+
 						case '1':
 							OnTest1(now);
 							break;
@@ -299,6 +304,9 @@ namespace __06_aximm_test1__ {
 				last_ticks = args.ticks;
 				last_tick_time = now;
 			}
+		}
+
+		void OnSnapshot(int64_t now) {
 		}
 
 		void OnTest1(int64_t now) {
@@ -413,7 +421,6 @@ namespace __06_aximm_test1__ {
 				}
 
 				int fd_stdin = 0; // stdin
-				int nJobs = 0;
 				while(true) {
 					fd_set readfds;
 					FD_ZERO(&readfds);
@@ -438,14 +445,6 @@ namespace __06_aximm_test1__ {
 					}
 
 					if (FD_ISSET(fd_qvio, &readfds)) {
-						uint32_t nEventData;
-						ssize_t ret = read(fd_qvio, &nEventData, sizeof(nEventData));
-						if(ret != sizeof(nEventData)) {
-							LOGE("%s(%d): read() failed, %d ?= %d", __FUNCTION__, __LINE__, ret, sizeof(nEventData));
-							break;
-						}
-						nJobs++;
-
 						// LOGD("%d: QVIO_IOC_DQBUF", i);
 						int nBufIdx;
 						{
@@ -498,14 +497,6 @@ namespace __06_aximm_test1__ {
 					}
 
 					if (FD_ISSET(fd_qvio, &readfds)) {
-						uint32_t nEventData;
-						ssize_t ret = read(fd_qvio, &nEventData, sizeof(nEventData));
-						if(ret != sizeof(nEventData)) {
-							LOGE("%s(%d): read() failed, %d ?= %d", __FUNCTION__, __LINE__, ret, sizeof(nEventData));
-							break;
-						}
-						nJobs++;
-
 						int nBufIdx;
 						{
 							qvio_buffer args;
@@ -582,7 +573,6 @@ namespace __06_aximm_test1__ {
 				}
 
 				int fd_stdin = 0; // stdin
-				int nJobs = 0;
 				while(true) {
 					fd_set readfds;
 					FD_ZERO(&readfds);
@@ -607,14 +597,6 @@ namespace __06_aximm_test1__ {
 					}
 
 					if (FD_ISSET(fd_qvio, &readfds)) {
-						uint32_t nEventData;
-						ssize_t ret = read(fd_qvio, &nEventData, sizeof(nEventData));
-						if(ret != sizeof(nEventData)) {
-							LOGE("%s(%d): read() failed, %d ?= %d", __FUNCTION__, __LINE__, ret, sizeof(nEventData));
-							break;
-						}
-						nJobs++;
-
 						// LOGD("%d: QVIO_IOC_DQBUF", i);
 						int nBufIdx;
 						{
@@ -674,14 +656,6 @@ namespace __06_aximm_test1__ {
 					}
 
 					if (FD_ISSET(fd_qvio, &readfds)) {
-						uint32_t nEventData;
-						ssize_t ret = read(fd_qvio, &nEventData, sizeof(nEventData));
-						if(ret != sizeof(nEventData)) {
-							LOGE("%s(%d): read() failed, %d ?= %d", __FUNCTION__, __LINE__, ret, sizeof(nEventData));
-							break;
-						}
-						nJobs++;
-
 						int nBufIdx;
 						{
 							qvio_buffer args;
@@ -756,7 +730,6 @@ namespace __06_aximm_test1__ {
 				}
 
 				int fd_stdin = 0; // stdin
-				int nJobs = 0;
 				while(true) {
 					fd_set readfds;
 					FD_ZERO(&readfds);
@@ -781,14 +754,6 @@ namespace __06_aximm_test1__ {
 					}
 
 					if (FD_ISSET(fd_qvio, &readfds)) {
-						uint32_t nEventData;
-						ssize_t ret = read(fd_qvio, &nEventData, sizeof(nEventData));
-						if(ret != sizeof(nEventData)) {
-							LOGE("%s(%d): read() failed, %d ?= %d", __FUNCTION__, __LINE__, ret, sizeof(nEventData));
-							break;
-						}
-						nJobs++;
-
 						// LOGD("%d: QVIO_IOC_DQBUF", i);
 						int nBufIdx;
 						{
@@ -894,7 +859,6 @@ namespace __06_aximm_test1__ {
 				}
 
 				int fd_stdin = 0; // stdin
-				int nJobs = 0;
 				while(true) {
 					fd_set readfds;
 					FD_ZERO(&readfds);
@@ -919,14 +883,6 @@ namespace __06_aximm_test1__ {
 					}
 
 					if (FD_ISSET(fd_qvio, &readfds)) {
-						uint32_t nEventData;
-						ssize_t ret = read(fd_qvio, &nEventData, sizeof(nEventData));
-						if(ret != sizeof(nEventData)) {
-							LOGE("%s(%d): read() failed, %d ?= %d", __FUNCTION__, __LINE__, ret, sizeof(nEventData));
-							break;
-						}
-						nJobs++;
-
 						// LOGD("%d: QVIO_IOC_DQBUF", i);
 						int nBufIdx;
 						{
@@ -999,14 +955,6 @@ namespace __06_aximm_test1__ {
 					}
 
 					if (FD_ISSET(fd_qvio, &readfds)) {
-						uint32_t nEventData;
-						ssize_t ret = read(fd_qvio, &nEventData, sizeof(nEventData));
-						if(ret != sizeof(nEventData)) {
-							LOGE("%s(%d): read() failed, %d ?= %d", __FUNCTION__, __LINE__, ret, sizeof(nEventData));
-							break;
-						}
-						nJobs++;
-
 						int nBufIdx;
 						{
 							qvio_buffer args;

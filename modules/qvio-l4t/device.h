@@ -49,12 +49,8 @@ struct qvio_device {
 	struct qvio_buffer* buffers;
 	void* mmap_buffer;
 
-	// job list
-	spinlock_t job_list_lock;
+	spinlock_t lock;
 	struct list_head job_list; // qvio_buf_entry
-
-	// done list
-	spinlock_t done_list_lock;
 	struct list_head done_list; // qvio_buf_entry
 
 	// irq control
