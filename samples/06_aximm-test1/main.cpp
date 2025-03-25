@@ -102,6 +102,16 @@ namespace __06_aximm_test1__ {
 				};
 
 				{
+					int work_mode = QVIO_WORK_MODE_AXIMM_TEST1;
+					err = ioctl(fd_qvio, QVIO_IOC_S_WORK_MODE, &work_mode);
+					if(err) {
+						err = errno;
+						LOGE("%s(%d): ioctl(QVIO_IOC_S_WORK_MODE) failed, err=%d", __FUNCTION__, __LINE__, err);
+						break;
+					}
+				}
+
+				{
 					qvio_format args;
 					memset(&args, 0, sizeof(args));
 					args.width = nWidth;

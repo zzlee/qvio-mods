@@ -149,6 +149,12 @@ enum qvio_buf_type {
 	QVIO_BUF_TYPE_MMAP,
 };
 
+enum qvio_work_mode {
+	QVIO_WORK_MODE_AXIMM_TEST0 = 1,
+	QVIO_WORK_MODE_AXIMM_TEST1,
+	QVIO_WORK_MODE_FRMBUFWR,
+};
+
 struct qvio_buffer {
 	__u32 index;
 
@@ -193,5 +199,7 @@ struct qvio_req_bufs {
 #define QVIO_IOC_DQBUF			_IOWR(QVIO_IOC_MAGIC, 0x6, struct qvio_buffer)
 #define QVIO_IOC_STREAMON		_IO  (QVIO_IOC_MAGIC, 0x7)
 #define QVIO_IOC_STREAMOFF		_IO  (QVIO_IOC_MAGIC, 0x8)
+#define QVIO_IOC_S_WORK_MODE	_IOW (QVIO_IOC_MAGIC, 0x9, int)
+#define QVIO_IOC_G_WORK_MODE	_IOR (QVIO_IOC_MAGIC, 0x9, int)
 
 #endif /* _UAPI_LINUX_QVIO_L4T_H */

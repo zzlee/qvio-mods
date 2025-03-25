@@ -9,7 +9,10 @@
 #include <linux/pci.h>
 #include <linux/cdev.h>
 
+#include "xaximm_test0.h"
 #include "xaximm_test1.h"
+#include "xz_frmbuf_writer.h"
+#include "xv_tpg.h"
 
 struct qvio_device {
 	struct kref ref;
@@ -41,9 +44,13 @@ struct qvio_device {
 	struct qvio_cdev cdev;
 
 	// IP cores
-	XAximm_test1 xaximm_test1;
 	void __iomem * zzlab_env;
+	XAximm_test0 xaximm_test0;
+	XAximm_test1 xaximm_test1;
+	XZ_frmbuf_writer xFrmBufWr;
+	XV_tpg xTpg;
 
+	int work_mode;
 	struct qvio_format format;
 	__u32 buffers_count;
 	struct qvio_buffer* buffers;

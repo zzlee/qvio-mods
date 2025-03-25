@@ -99,7 +99,7 @@ static ssize_t dma_block_index_store(struct device *dev, struct device_attribute
 }
 
 static void do_test_case_0(struct qvio_device* self) {
-	XAximm_test1* pXaximm_test1 = &self->xaximm_test1;
+	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
 	int nWidth = 64;
 	int nHeight = 32;
 	int nStride = nWidth + 16;
@@ -128,24 +128,24 @@ static void do_test_case_0(struct qvio_device* self) {
 
 	dma_sync_single_for_device(self->dev, self->dma_blocks[0].dma_handle, PAGE_SIZE, DMA_TO_DEVICE);
 
-	nIsIdle = XAximm_test1_IsIdle(pXaximm_test1);
+	nIsIdle = XAximm_test1_IsIdle(xaximm_test1);
 	pr_info("XAximm_test1_IsIdle()=%u\n", nIsIdle);
 	if(! nIsIdle) {
 		goto err0;
 	}
 
-	XAximm_test1_DisableAutoRestart(pXaximm_test1);
-	XAximm_test1_InterruptEnable(pXaximm_test1, 0x1); // ap_done
-	XAximm_test1_InterruptGlobalEnable(pXaximm_test1);
+	XAximm_test1_DisableAutoRestart(xaximm_test1);
+	XAximm_test1_InterruptEnable(xaximm_test1, 0x1); // ap_done
+	XAximm_test1_InterruptGlobalEnable(xaximm_test1);
 
-	XAximm_test1_Set_pDescItem(pXaximm_test1, self->dma_blocks[0].dma_handle);
-	XAximm_test1_Set_nDescItemCount(pXaximm_test1, 1);
-	XAximm_test1_Set_pDstPxl(pXaximm_test1, self->dma_blocks[1].dma_handle);
-	XAximm_test1_Set_nDstPxlStride(pXaximm_test1, nStride);
-	XAximm_test1_Set_nWidth(pXaximm_test1, nWidth);
-	XAximm_test1_Set_nHeight(pXaximm_test1, nHeight);
+	XAximm_test1_Set_pDescItem(xaximm_test1, self->dma_blocks[0].dma_handle);
+	XAximm_test1_Set_nDescItemCount(xaximm_test1, 1);
+	XAximm_test1_Set_pDstPxl(xaximm_test1, self->dma_blocks[1].dma_handle);
+	XAximm_test1_Set_nDstPxlStride(xaximm_test1, nStride);
+	XAximm_test1_Set_nWidth(xaximm_test1, nWidth);
+	XAximm_test1_Set_nHeight(xaximm_test1, nHeight);
 
-	XAximm_test1_Start(pXaximm_test1);
+	XAximm_test1_Start(xaximm_test1);
 
 	return;
 
@@ -154,17 +154,17 @@ err0:
 }
 
 static void do_test_case_1(struct qvio_device* self) {
-	XAximm_test1* pXaximm_test1 = &self->xaximm_test1;
+	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
 	u32 nIsIdle;
 
-	XAximm_test1_InterruptClear(pXaximm_test1, 0x01); // ap_done;
+	XAximm_test1_InterruptClear(xaximm_test1, 0x01); // ap_done;
 
-	nIsIdle = XAximm_test1_IsIdle(pXaximm_test1);
+	nIsIdle = XAximm_test1_IsIdle(xaximm_test1);
 	pr_info("XAximm_test1_IsIdle()=%u\n", nIsIdle);
 }
 
 static void do_test_case_2(struct qvio_device* self) {
-	XAximm_test1* pXaximm_test1 = &self->xaximm_test1;
+	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
 	int nWidth = 64;
 	int nHeight = 128;
 	int nStride = nWidth + 16;
@@ -205,24 +205,24 @@ static void do_test_case_2(struct qvio_device* self) {
 
 	dma_sync_single_for_device(self->dev, self->dma_blocks[0].dma_handle, PAGE_SIZE, DMA_TO_DEVICE);
 
-	nIsIdle = XAximm_test1_IsIdle(pXaximm_test1);
+	nIsIdle = XAximm_test1_IsIdle(xaximm_test1);
 	pr_info("XAximm_test1_IsIdle()=%u\n", nIsIdle);
 	if(! nIsIdle) {
 		goto err0;
 	}
 
-	XAximm_test1_DisableAutoRestart(pXaximm_test1);
-	XAximm_test1_InterruptEnable(pXaximm_test1, 0x1); // ap_done
-	XAximm_test1_InterruptGlobalEnable(pXaximm_test1);
+	XAximm_test1_DisableAutoRestart(xaximm_test1);
+	XAximm_test1_InterruptEnable(xaximm_test1, 0x1); // ap_done
+	XAximm_test1_InterruptGlobalEnable(xaximm_test1);
 
-	XAximm_test1_Set_pDescItem(pXaximm_test1, self->dma_blocks[0].dma_handle);
-	XAximm_test1_Set_nDescItemCount(pXaximm_test1, nDescItems);
-	XAximm_test1_Set_pDstPxl(pXaximm_test1, pDstBase);
-	XAximm_test1_Set_nDstPxlStride(pXaximm_test1, nStride);
-	XAximm_test1_Set_nWidth(pXaximm_test1, nWidth);
-	XAximm_test1_Set_nHeight(pXaximm_test1, nHeight);
+	XAximm_test1_Set_pDescItem(xaximm_test1, self->dma_blocks[0].dma_handle);
+	XAximm_test1_Set_nDescItemCount(xaximm_test1, nDescItems);
+	XAximm_test1_Set_pDstPxl(xaximm_test1, pDstBase);
+	XAximm_test1_Set_nDstPxlStride(xaximm_test1, nStride);
+	XAximm_test1_Set_nWidth(xaximm_test1, nWidth);
+	XAximm_test1_Set_nHeight(xaximm_test1, nHeight);
 
-	XAximm_test1_Start(pXaximm_test1);
+	XAximm_test1_Start(xaximm_test1);
 	return;
 
 err0:
@@ -313,6 +313,8 @@ static long __file_ioctl_qbuf(struct file * filp, unsigned long arg);
 static long __file_ioctl_dqbuf(struct file * filp, unsigned long arg);
 static long __file_ioctl_streamon(struct file * filp, unsigned long arg);
 static long __file_ioctl_streamoff(struct file * filp, unsigned long arg);
+static long __file_ioctl_s_work_mode(struct file * filp, unsigned long arg);
+static long __file_ioctl_g_work_mode(struct file * filp, unsigned long arg);
 
 static __poll_t __file_poll(struct file *filp, struct poll_table_struct *wait) {
 	struct qvio_device* self = filp->private_data;
@@ -363,6 +365,14 @@ static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg
 
 	case QVIO_IOC_STREAMOFF:
 		ret = __file_ioctl_streamoff(filp, arg);
+		break;
+
+	case QVIO_IOC_S_WORK_MODE:
+		ret = __file_ioctl_s_work_mode(filp, arg);
+		break;
+
+	case QVIO_IOC_G_WORK_MODE:
+		ret = __file_ioctl_g_work_mode(filp, arg);
 		break;
 
 	default:
@@ -1009,7 +1019,10 @@ err0:
 
 static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 	struct qvio_device* self = filp->private_data;
-	XAximm_test1* pXaximm_test1 = &self->xaximm_test1;
+	XAximm_test0* xaximm_test0 = &self->xaximm_test0;
+	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
+	XZ_frmbuf_writer* xFrmBufWr = &self->xFrmBufWr;
+	XV_tpg* xTpg = &self->xTpg;
 	long ret;
 	struct qvio_buf_entry* buf_entry;
 	u32 value;
@@ -1024,47 +1037,129 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 
 	buf_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
 
-#if 1
-	pr_info("reset IP...\n"); // [x, aximm_test1, x, x]
-	value = *(u32*)((u8*)self->zzlab_env + 0x24);
-	*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x4; // 0100
-	msleep(100);
-	*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x4; // 0100
-#endif
-
-	for(i = 0;i < 5;i++) {
-		nIsIdle = XAximm_test1_IsIdle(pXaximm_test1);
-		pr_info("%d: XAximm_test1_IsIdle()=%u\n", i, nIsIdle);
-		if(nIsIdle)
-			break;
-		msleep(100);
-	}
-
-	if(! nIsIdle) {
-		pr_err("nIsIdle=%u\n", nIsIdle);
-	}
-
-	XAximm_test1_DisableAutoRestart(pXaximm_test1);
-	XAximm_test1_InterruptEnable(pXaximm_test1, 0x1); // ap_done
-	XAximm_test1_InterruptGlobalEnable(pXaximm_test1);
-
 #if 0
-	pr_info("------- %llX %d %llX %d\n",
+	pr_info("------- %llX %d %llX (%d %d %d %d)\n",
 		(int64_t)buf_entry->desc_dma_handle,
 		buf_entry->desc_items,
 		(int64_t)buf_entry->dst_dma_handle,
-		buf_entry->buf.stride[0]);
+		buf_entry->buf.offset[0],
+		buf_entry->buf.offset[1]);
+		buf_entry->buf.stride[0],
+		buf_entry->buf.stride[1]);
 #endif
 
-	XAximm_test1_Set_pDescItem(pXaximm_test1, buf_entry->desc_dma_handle);
-	XAximm_test1_Set_nDescItemCount(pXaximm_test1, buf_entry->desc_items);
-	XAximm_test1_Set_pDstPxl(pXaximm_test1, buf_entry->dst_dma_handle);
-	XAximm_test1_Set_nDstPxlStride(pXaximm_test1, buf_entry->buf.stride[0]);
-	XAximm_test1_Set_nWidth(pXaximm_test1, self->format.width);
-	XAximm_test1_Set_nHeight(pXaximm_test1, self->format.height);
+	switch(self->work_mode) {
+	case QVIO_WORK_MODE_AXIMM_TEST0:
+		pr_info("reset IP...\n"); // [aximm_test0, x, x, x, x]
+		value = *(u32*)((u8*)self->zzlab_env + 0x24);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x10; // 10000
+		msleep(100);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x10; // 10000
 
-	XAximm_test1_Start(pXaximm_test1);
-	pr_info("XAximm_test1_Start()...\n");
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XAximm_test0_IsIdle(xaximm_test0);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
+		}
+
+		XAximm_test0_DisableAutoRestart(xaximm_test0);
+		XAximm_test0_InterruptEnable(xaximm_test0, 0x1); // ap_done
+		XAximm_test0_InterruptGlobalEnable(xaximm_test0);
+		XAximm_test0_Set_pDstPxl(xaximm_test0, self->dma_blocks[0].dma_handle);
+		XAximm_test0_Set_nSize(xaximm_test0, self->desc_block_size);
+		XAximm_test0_Set_nTimes(xaximm_test0, self->format.height);
+		XAximm_test0_Start(xaximm_test0);
+		pr_info("XAximm_test0_Start()...\n");
+		break;
+
+	case QVIO_WORK_MODE_AXIMM_TEST1:
+		pr_info("reset IP...\n"); // [x, x, aximm_test1, x, x]
+		value = *(u32*)((u8*)self->zzlab_env + 0x24);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x04; // 00100
+		msleep(100);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x04; // 00100
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XAximm_test1_IsIdle(xaximm_test1);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("nIsIdle=%u\n", nIsIdle);
+		}
+
+		XAximm_test1_DisableAutoRestart(xaximm_test1);
+		XAximm_test1_InterruptEnable(xaximm_test1, 0x1); // ap_done
+		XAximm_test1_InterruptGlobalEnable(xaximm_test1);
+		XAximm_test1_Set_pDescItem(xaximm_test1, buf_entry->desc_dma_handle);
+		XAximm_test1_Set_nDescItemCount(xaximm_test1, buf_entry->desc_items);
+		XAximm_test1_Set_pDstPxl(xaximm_test1, buf_entry->dst_dma_handle);
+		XAximm_test1_Set_nDstPxlStride(xaximm_test1, buf_entry->buf.stride[0]);
+		XAximm_test1_Set_nWidth(xaximm_test1, self->format.width);
+		XAximm_test1_Set_nHeight(xaximm_test1, self->format.height);
+		XAximm_test1_Start(xaximm_test1);
+		pr_info("XAximm_test1_Start()...\n");
+		break;
+
+	case QVIO_WORK_MODE_FRMBUFWR:
+		pr_info("reset IP...\n"); // [x, z_frmbuf_writer, x, x, tpg]
+		value = *(u32*)((u8*)self->zzlab_env + 0x24);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x09; // 01001
+		msleep(100);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x09; // 01001
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XZ_frmbuf_writer_IsIdle(xFrmBufWr);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("nIsIdle=%u\n", nIsIdle);
+		}
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XV_tpg_IsIdle(xTpg);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("unexpected, XV_tpg_IsIdle()=%u\n", nIsIdle);
+		}
+
+		pr_warn("TODO:....\n");
+		XZ_frmbuf_writer_DisableAutoRestart(xFrmBufWr);
+		XZ_frmbuf_writer_InterruptEnable(xFrmBufWr, 0x1); // ap_done
+		XZ_frmbuf_writer_InterruptGlobalEnable(xFrmBufWr);
+		// XZ_frmbuf_writer_Set_pDescItem(XZ_frmbuf_writer, buf_entry->desc_dma_handle);
+		// XZ_frmbuf_writer_Set_nDescItemCount(XZ_frmbuf_writer, buf_entry->desc_items);
+		// XZ_frmbuf_writer_Set_pDstPxl(XZ_frmbuf_writer, buf_entry->dst_dma_handle);
+		// XZ_frmbuf_writer_Set_nDstPxlStride(XZ_frmbuf_writer, buf_entry->buf.stride[0]);
+		XZ_frmbuf_writer_Set_nWidth(xFrmBufWr, self->format.width);
+		XZ_frmbuf_writer_Set_nHeight(xFrmBufWr, self->format.height);
+		XZ_frmbuf_writer_Start(xFrmBufWr);
+		pr_info("XZ_frmbuf_writer_Start()...\n");
+
+		XV_tpg_EnableAutoRestart(xTpg);
+		XV_tpg_InterruptGlobalDisable(xTpg);
+		XV_tpg_Set_width(xTpg, self->format.width);
+		XV_tpg_Set_height(xTpg, self->format.height);
+		XV_tpg_Start(xTpg);
+		pr_info("XV_tpg_Start()...\n");
+		break;
+
+	default:
+		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
+		ret = -EINVAL;
+		goto err0;
+		break;
+	}
 
 	return 0;
 
@@ -1074,26 +1169,52 @@ err0:
 
 static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 	struct qvio_device* self = filp->private_data;
-	XAximm_test1* pXaximm_test1 = &self->xaximm_test1;
+	long ret;
+	XAximm_test0* xaximm_test0 = &self->xaximm_test0;
+	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
 	int i;
 	u32 nIsIdle;
 	struct qvio_buf_entry* buf_entry;
 
-	XAximm_test1_InterruptGlobalDisable(pXaximm_test1);
+	switch(self->work_mode) {
+	case QVIO_WORK_MODE_AXIMM_TEST0:
+		XAximm_test0_InterruptGlobalDisable(xaximm_test0);
 
-	for(i = 0;i < 5;i++) {
-		nIsIdle = XAximm_test1_IsIdle(pXaximm_test1);
-		pr_info("%d: XAximm_test1_IsIdle()=%u\n", i, nIsIdle);
-		if(nIsIdle)
-			break;
-		msleep(100);
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XAximm_test0_IsIdle(xaximm_test0);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("nIsIdle=%u\n", nIsIdle);
+		}
+
+		XAximm_test0_InterruptClear(xaximm_test0, ISR_ALL_IRQ_MASK);
+		break;
+
+	case QVIO_WORK_MODE_AXIMM_TEST1:
+		XAximm_test1_InterruptGlobalDisable(xaximm_test1);
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XAximm_test1_IsIdle(xaximm_test1);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("nIsIdle=%u\n", nIsIdle);
+		}
+
+		XAximm_test1_InterruptClear(xaximm_test1, ISR_ALL_IRQ_MASK);
+		break;
+
+	default:
+		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
+		ret = -EINVAL;
+		goto err0;
+		break;
 	}
-
-	if(! nIsIdle) {
-		pr_err("nIsIdle=%u\n", nIsIdle);
-	}
-
-	XAximm_test1_InterruptClear(pXaximm_test1, ISR_ALL_IRQ_MASK);
 
 	if(! list_empty(&self->job_list)) {
 		pr_warn("job list is not empty!!\n");
@@ -1121,6 +1242,53 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 	atomic_set(&self->irq_event_data, 0);
 
 	return 0;
+
+err0:
+	return ret;
+}
+
+static long __file_ioctl_s_work_mode(struct file * filp, unsigned long arg) {
+	long ret;
+	struct qvio_device* self = filp->private_data;
+	int args;
+
+	ret = copy_from_user(&args, (void __user *)arg, sizeof(args));
+	if (ret != 0) {
+		pr_err("copy_from_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err0;
+	}
+
+	self->work_mode = args;
+
+	pr_info("work_mode=%d\n", self->work_mode);
+
+	return 0;
+
+err0:
+	return ret;
+}
+
+static long __file_ioctl_g_work_mode(struct file * filp, unsigned long arg) {
+	long ret;
+	struct qvio_device* self = filp->private_data;
+	int args;
+
+	args = self->work_mode;
+
+	ret = copy_to_user((void __user *)arg, &args, sizeof(args));
+	if (ret != 0) {
+		pr_err("copy_to_user() failed, err=%d\n", (int)ret);
+
+		ret = -EFAULT;
+		goto err0;
+	}
+
+	return 0;
+
+err0:
+	return ret;
 }
 
 static const struct file_operations __fops = {
@@ -1373,10 +1541,10 @@ static irqreturn_t __irq_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t __irq_handler_0(int irq, void *dev_id)
+static irqreturn_t __irq_handler_xaximm_test1(int irq, void *dev_id)
 {
 	struct qvio_device* self = dev_id;
-	XAximm_test1* pXaximm_test1 = &self->xaximm_test1;
+	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
 	u32 status;
 	struct qvio_buf_entry* done_entry;
 	struct qvio_buf_entry* next_entry;
@@ -1386,13 +1554,13 @@ static irqreturn_t __irq_handler_0(int irq, void *dev_id)
 	self->irq_counter++;
 #endif
 
-	status = XAximm_test1_InterruptGetStatus(pXaximm_test1);
+	status = XAximm_test1_InterruptGetStatus(xaximm_test1);
 	if(! (status & ISR_ALL_IRQ_MASK)) {
 		pr_warn("unexpected, status=%u\n", status);
 		return IRQ_NONE;
 	}
 
-	XAximm_test1_InterruptClear(pXaximm_test1, status & ISR_ALL_IRQ_MASK);
+	XAximm_test1_InterruptClear(xaximm_test1, status & ISR_ALL_IRQ_MASK);
 
 	if(status & ISR_AP_DONE_IRQ) switch(1) { case 1:
 		if(list_empty(&self->job_list)) {
@@ -1433,11 +1601,11 @@ static irqreturn_t __irq_handler_0(int irq, void *dev_id)
 				(int)next_entry->qbuf.stride[0]);
 #endif
 
-			XAximm_test1_Set_pDescItem(pXaximm_test1, next_entry->desc_dma_handle);
-			XAximm_test1_Set_nDescItemCount(pXaximm_test1, next_entry->desc_items);
-			XAximm_test1_Set_pDstPxl(pXaximm_test1, next_entry->dst_dma_handle);
-			XAximm_test1_Set_nDstPxlStride(pXaximm_test1, next_entry->buf.stride[0]);
-			XAximm_test1_Start(pXaximm_test1);
+			XAximm_test1_Set_pDescItem(xaximm_test1, next_entry->desc_dma_handle);
+			XAximm_test1_Set_nDescItemCount(xaximm_test1, next_entry->desc_items);
+			XAximm_test1_Set_pDstPxl(xaximm_test1, next_entry->dst_dma_handle);
+			XAximm_test1_Set_nDstPxlStride(xaximm_test1, next_entry->buf.stride[0]);
+			XAximm_test1_Start(xaximm_test1);
 		} else {
 			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
 		}
@@ -1446,12 +1614,91 @@ static irqreturn_t __irq_handler_0(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t __irq_handler_1(int irq, void *dev_id)
+static irqreturn_t __irq_handler_tpg(int irq, void *dev_id)
 {
 	struct qvio_device* self = dev_id;
 
 	pr_info("TPG, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
 	self->irq_counter++;
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t __irq_handler_frmbufwr(int irq, void *dev_id)
+{
+	struct qvio_device* self = dev_id;
+
+	pr_info("FrmBufWr, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+	self->irq_counter++;
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t __irq_handler_xaximm_test0(int irq, void *dev_id)
+{
+	struct qvio_device* self = dev_id;
+	XAximm_test0* xaximm_test0 = &self->xaximm_test0;
+	u32 status;
+	struct qvio_buf_entry* done_entry;
+	struct qvio_buf_entry* next_entry;
+
+#if 0
+	pr_info("AXIMM_TEST1, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+	self->irq_counter++;
+#endif
+
+	status = XAximm_test0_InterruptGetStatus(xaximm_test0);
+	if(! (status & ISR_ALL_IRQ_MASK)) {
+		pr_warn("unexpected, status=%u\n", status);
+		return IRQ_NONE;
+	}
+
+	XAximm_test0_InterruptClear(xaximm_test0, status & ISR_ALL_IRQ_MASK);
+
+	if(status & ISR_AP_DONE_IRQ) switch(1) { case 1:
+		if(list_empty(&self->job_list)) {
+			pr_err("self->job_list is empty\n");
+			break;
+		}
+
+		// move job from job_list to done_list
+		spin_lock(&self->lock);
+		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+		list_del(&done_entry->node);
+		// try pick next job
+		next_entry = list_empty(&self->job_list) ? NULL :
+			list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+
+		list_add_tail(&done_entry->node, &self->done_list);
+		spin_unlock(&self->lock);
+
+		// job done wake up
+		atomic_set(&self->irq_event_data, self->done_jobs++);
+		atomic_inc(&self->irq_event);
+		wake_up_interruptible(&self->irq_wait);
+
+		// try to do another job
+		if(next_entry) {
+#if 0
+			pr_info("(%d, %llX, %d, %llX, %d) -> (%d, %llX, %d, %llX, %d)\n",
+				(int)done_entry->qbuf.cookie,
+				(int64_t)done_entry->desc_dma_handle,
+				(int)done_entry->desc_items,
+				(int64_t)done_entry->dst_dma_handle,
+				(int)done_entry->qbuf.stride[0],
+
+				(int)next_entry->qbuf.cookie,
+				(int64_t)next_entry->desc_dma_handle,
+				(int)next_entry->desc_items,
+				(int64_t)next_entry->dst_dma_handle,
+				(int)next_entry->qbuf.stride[0]);
+#endif
+
+			XAximm_test0_Start(xaximm_test0);
+		} else {
+			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
+		}
+	}
 
 	return IRQ_HANDLED;
 }
@@ -1531,11 +1778,19 @@ static int irq_setup(struct qvio_device* self, struct pci_dev* pdev) {
 
 			switch(i) {
 			case 0:
-				irq_handler = __irq_handler_0;
+				irq_handler = __irq_handler_xaximm_test1;
 				break;
 
 			case 1:
-				irq_handler = __irq_handler_1;
+				irq_handler = __irq_handler_tpg;
+				break;
+
+			case 2:
+				irq_handler = __irq_handler_frmbufwr;
+				break;
+
+			case 3:
+				irq_handler = __irq_handler_xaximm_test0;
 				break;
 
 			default:
@@ -1715,6 +1970,8 @@ err0:
 static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	int err = 0;
 	struct qvio_device* self;
+	int i;
+	u32 nIsIdle;
 
 	pr_info("%04X:%04X (%04X:%04X)\n", (int)pdev->vendor, (int)pdev->device,
 		(int)pdev->subsystem_vendor, (int)pdev->subsystem_device);
@@ -1796,15 +2053,81 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	pr_info("zzlab_env = %p\n", self->zzlab_env);
 
 #if 1
-	pr_info("reset all IPs...\n"); // [z_frmbuf_writer, aximm_test1, pcie_intr, tpg]
-	*(u32*)((u8*)self->zzlab_env + 0x24) = 0x2; // 0010
+	pr_info("reset all IPs...\n"); // [aximm_test0, z_frmbuf_writer, aximm_test1, pcie_intr, tpg]
+	*(u32*)((u8*)self->zzlab_env + 0x24) = 0x02; // 00010
 	msleep(100);
-	*(u32*)((u8*)self->zzlab_env + 0x24) = 0xD; // 1101
+	*(u32*)((u8*)self->zzlab_env + 0x24) = 0x1D; // 11101
 #endif
+
+	self->xaximm_test0.Control_BaseAddress = (u64)self->bar[0] + 0x40000;
+	self->xaximm_test0.IsReady = XIL_COMPONENT_IS_READY;
+	pr_info("xaximm_test0 = %p\n", (void*)self->xaximm_test0.Control_BaseAddress);
 
 	self->xaximm_test1.Control_BaseAddress = (u64)self->bar[0] + 0x20000;
 	self->xaximm_test1.IsReady = XIL_COMPONENT_IS_READY;
 	pr_info("xaximm_test1 = %p\n", (void*)self->xaximm_test1.Control_BaseAddress);
+
+	self->xFrmBufWr.Control_BaseAddress = (u64)self->bar[0] + 0x30000;
+	self->xFrmBufWr.IsReady = XIL_COMPONENT_IS_READY;
+	pr_info("xFrmBufWr = %p\n", (void*)self->xFrmBufWr.Control_BaseAddress);
+
+    self->xTpg.Config.DeviceId = 0;
+    self->xTpg.Config.BaseAddress = (u64)self->bar[0] + 0x10000;
+    self->xTpg.Config.HasAxi4sSlave = 0;
+    self->xTpg.Config.PixPerClk = 8;
+    self->xTpg.Config.NumVidComponents = 3;
+    self->xTpg.Config.MaxWidth = 4096;
+    self->xTpg.Config.MaxHeight = 2160;
+    self->xTpg.Config.MaxDataWidth = 10;
+	self->xTpg.Config.SolidColorEnable = 0;
+	self->xTpg.Config.RampEnable = 1;
+	self->xTpg.Config.ColorBarEnable = 0;
+	self->xTpg.Config.DisplayPortEnable = 0;
+	self->xTpg.Config.ColorSweepEnable = 0;
+	self->xTpg.Config.ZoneplateEnable = 0;
+	self->xTpg.Config.ForegroundEnable = 0;
+    self->xTpg.IsReady = XIL_COMPONENT_IS_READY;
+	pr_info("xTpg = %p\n", (void*)self->xTpg.Config.BaseAddress);
+
+	for(i = 0;i < 5;i++) {
+		nIsIdle = XAximm_test0_IsIdle(&self->xaximm_test0);
+		if(nIsIdle)
+			break;
+		msleep(100);
+	}
+	if(! nIsIdle) {
+		pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
+	}
+
+	for(i = 0;i < 5;i++) {
+		nIsIdle = XAximm_test1_IsIdle(&self->xaximm_test1);
+		if(nIsIdle)
+			break;
+		msleep(100);
+	}
+	if(! nIsIdle) {
+		pr_err("unexpected, XAximm_test1_IsIdle()=%u\n", nIsIdle);
+	}
+
+	for(i = 0;i < 5;i++) {
+		nIsIdle = XZ_frmbuf_writer_IsIdle(&self->xFrmBufWr);
+		if(nIsIdle)
+			break;
+		msleep(100);
+	}
+	if(! nIsIdle) {
+		pr_err("unexpected, XZ_frmbuf_writer_IsIdle()=%u\n", nIsIdle);
+	}
+
+	for(i = 0;i < 5;i++) {
+		nIsIdle = XV_tpg_IsIdle(&self->xTpg);
+		if(nIsIdle)
+			break;
+		msleep(100);
+	}
+	if(! nIsIdle) {
+		pr_err("unexpected, XV_tpg_IsIdle()=%u\n", nIsIdle);
+	}
 
 	self->cdev.fops = &__fops;
 	self->cdev.private_data = self;
