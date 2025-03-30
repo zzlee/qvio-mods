@@ -52,6 +52,7 @@ struct qvio_device {
 
 	int work_mode;
 	struct qvio_format format;
+	int planes;
 	__u32 buffers_count;
 	struct qvio_buffer* buffers;
 	void* mmap_buffer;

@@ -40,6 +40,10 @@ ZZ_INIT_LOG("06_aximm-test1")
 using namespace __zz_clock__;
 
 namespace __06_aximm_test1__ {
+	inline uint32_t fourcc(char a, char b, char c, char d) {
+		return (uint32_t)a | ((uint32_t)b << 8) | ((uint32_t)c << 16) | ((uint32_t)d << 24);
+	}
+
 	struct App {
 		typedef App self_t;
 
@@ -116,7 +120,7 @@ namespace __06_aximm_test1__ {
 					memset(&args, 0, sizeof(args));
 					args.width = nWidth;
 					args.height = nHeight;
-					args.fmt = 0;
+					args.fmt = fourcc('Y', '8', '0', '0');
 					err = ioctl(fd_qvio, QVIO_IOC_S_FMT, &args);
 					if(err) {
 						err = errno;

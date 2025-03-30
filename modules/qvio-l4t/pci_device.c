@@ -22,6 +22,16 @@
 		(ISR_AP_DONE_IRQ | \
 		ISR_AP_READY_IRQ)
 
+enum {
+	FOURCC_Y800 = 0x30303859,
+	FOURCC_NV12 = 0x3231564E,
+	FOURCC_NV16 = 0x3631564E,
+};
+
+inline uint32_t fourcc(char a, char b, char c, char d) {
+	return (uint32_t)a | ((uint32_t)b << 8) | ((uint32_t)c << 16) | ((uint32_t)d << 24);
+}
+
 static const struct pci_device_id __pci_ids[] = {
 	{ PCI_DEVICE(0x12AB, 0xE380), },
 	{0,}
@@ -53,6 +63,37 @@ static void sgt_dump(struct sg_table *sgt, bool full)
 			sg_page(sg), sg->offset, sg->length, sg_dma_address(sg),
 			sg_dma_len(sg));
 	}
+}
+
+static ssize_t calc_buf_size(struct qvio_format* format, __u32 offset[4], __u32 stride[4]) {
+	ssize_t ret;
+
+	switch(format->fmt) {
+	case FOURCC_Y800:
+		ret = (ssize_t)(offset[0] + stride[0] * format->height);
+		break;
+
+	case FOURCC_NV16:
+		ret = (ssize_t)(offset[0] + stride[0] * format->height +
+			offset[1] + stride[1] * format->height);
+		break;
+
+	case FOURCC_NV12:
+		ret = (ssize_t)(offset[0] + stride[0] * format->height +
+			offset[1] + stride[1] * (format->height >> 1));
+		break;
+
+	default:
+		pr_err("unexpected value, format->fmt=%08X\n", format->fmt);
+		ret = -EINVAL;
+		goto err0;
+		break;
+	}
+
+	return ret;
+
+err0:
+	return ret;
 }
 
 static ssize_t dma_block_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -418,8 +459,25 @@ static long __file_ioctl_s_fmt(struct file * filp, unsigned long arg) {
 		goto err0;
 	}
 
-	self->format = args;
+	switch(args.fmt) {
+	case FOURCC_Y800:
+		self->planes = 1;
+		break;
 
+	case FOURCC_NV12:
+	case FOURCC_NV16:
+		self->planes = 2;
+		break;
+
+	default:
+		self->planes = 0;
+
+		ret = -EINVAL;
+		goto err0;
+		break;
+	}
+
+	self->format = args;
 	pr_info("%dx%d 0x%08X\n", self->format.width, self->format.height, self->format.fmt);
 
 	return 0;
@@ -453,7 +511,8 @@ static long __file_ioctl_req_bufs(struct file * filp, unsigned long arg) {
 	long ret;
 	struct qvio_device* self = filp->private_data;
 	struct qvio_req_bufs args;
-	size_t buf_size;
+	ssize_t buf_size;
+	size_t mmap_buffer_size;
 	int i;
 	__u32 offset;
 
@@ -484,13 +543,20 @@ static long __file_ioctl_req_bufs(struct file * filp, unsigned long arg) {
 		memcpy(self->buffers[i].stride, args.stride, ARRAY_SIZE(args.stride));
 	}
 
-	buf_size = (size_t)(args.stride[0] * self->format.height * args.count); // TODO: must calc by self->fmt
+	buf_size = calc_buf_size(&self->format, args.offset, args.stride);
+	if(buf_size <= 0) {
+		pr_err("unexpected value, buf_size=%ld\n", buf_size);
+		ret = buf_size;
+		goto err0;
+	}
 	pr_info("buf_size=%lu\n", buf_size);
 
 	switch(args.buf_type) {
 	case QVIO_BUF_TYPE_MMAP:
 		if(self->mmap_buffer) vfree(self->mmap_buffer);
-		self->mmap_buffer = vmalloc(buf_size);
+
+		mmap_buffer_size = (size_t)(buf_size * args.count);
+		self->mmap_buffer = vmalloc(mmap_buffer_size);
 		if(! self->mmap_buffer) {
 			pr_err("vmalloc() failed\n");
 			goto err0;
@@ -500,7 +566,7 @@ static long __file_ioctl_req_bufs(struct file * filp, unsigned long arg) {
 		for(i = 0;i < args.count;i++) {
 			self->buffers[i].u.offset = offset;
 
-			offset += args.stride[0] * self->format.height;
+			offset += buf_size;
 		}
 
 		break;
@@ -559,8 +625,10 @@ err0:
 	return ret;
 }
 
-static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, size_t buf_size, struct qvio_buf_entry** ppBufEntry) {
+#if 0
+static int buf_entry_from_sgt_y800(struct qvio_device* self, struct sg_table* sgt, struct qvio_buffer* buf, struct qvio_buf_entry** ppBufEntry) {
 	int ret;
+	size_t buf_size;
 	struct desc_item_t* pDescItems;
 	struct scatterlist *sg;
 	struct desc_item_t* pDescItem;
@@ -572,6 +640,8 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, si
 	int nMaxDescItemsInBlock;
 	int nDescItemsInBlock;
 	struct dma_block_t* desc_blocks;
+
+	buf_size = (size_t)(buf->stride[0] * self->format.height);
 
 	pDescItems = vmalloc(sizeof(struct desc_item_t) * sgt->nents);
 	if(! pDescItems) {
@@ -678,10 +748,273 @@ err1:
 err0:
 	return ret;
 }
+#endif
+
+static void skip_offset_sgt(int offset, struct scatterlist** pSg, int nents, int* pSgIndex, int* pSgOffset) {
+	struct scatterlist* sg = *pSg;
+	int sg_index = *pSgIndex;
+	int sg_offset = *pSgOffset;
+
+#if 0
+	pr_info("%d/%d: sg_offset=%d offset=%d\n", sg_index, nents, sg_offset, offset);
+#endif
+
+	while(sg_index < nents) {
+		offset -= (int)sg_dma_len(sg) - sg_offset;
+
+#if 0
+		pr_info("%d: offset=%d\n", sg_index, offset);
+#endif
+
+		if(offset == 0) {
+			sg = sg_next(sg);
+			sg_index++;
+			sg_offset = 0;
+			break;
+		} else if(offset < 0) {
+			sg_offset = (int)sg_dma_len(sg) + offset;
+			break;
+		}
+
+		sg = sg_next(sg);
+		sg_index++;
+		sg_offset = 0;
+	}
+
+	*pSg = sg;
+	*pSgIndex = sg_index;
+	*pSgOffset = sg_offset;
+
+#if 0
+	pr_info("%d: sg_offset=%d\n", sg_index, sg_offset);
+#endif
+}
+
+static int get_desc_items_sgt(int buf_size, struct scatterlist** pSg, int nents, int* pSgIndex, int* pSgOffset, struct desc_item_t* pSgDescItems, struct qvio_buf_regs* buf_regs) {
+	struct scatterlist* sg;
+	int sg_index = *pSgIndex;
+	int sg_offset;
+	dma_addr_t pDstBase;
+	struct desc_item_t* pDescItem;
+	int64_t nDstOffset;
+
+	if(sg_index >= nents) {
+		pr_err("unexpected, %d >= %d", sg_index, nents);
+		return -EPERM;
+	}
+
+	sg = *pSg;
+	sg_offset = *pSgOffset;
+	pDescItem = pSgDescItems;
+	pDstBase = sg_dma_address(sg);
+
+#if 0
+	pr_info("%d/%d: sg_offset=%d\n", sg_index, nents, sg_offset);
+#endif
+
+#if 1
+	while(sg_index < nents) {
+		nDstOffset = sg_dma_address(sg) + sg_offset - pDstBase;
+		pDescItem->nOffsetHigh = ((nDstOffset >> 32) & 0xFFFFFFFF);
+		pDescItem->nOffsetLow = (nDstOffset & 0xFFFFFFFF);
+		pDescItem->nSize = (size_t)sg_dma_len(sg) - sg_offset;
+		buf_size -= (int)sg_dma_len(sg) - sg_offset;
+
+#if 0
+		pr_info("%d: sg_offset=%d (0x%08X 0x%08X) 0x%08X, buf_size=%d\n", sg_index, sg_offset,
+			pDescItem->nOffsetHigh, pDescItem->nOffsetLow, pDescItem->nSize, buf_size);
+#endif
+
+		if(buf_size == 0) {
+			pDescItem++;
+			sg = sg_next(sg);
+			sg_index++;
+			sg_offset = 0;
+			break;
+		} else if(buf_size < 0) {
+			pDescItem->nSize += buf_size;
+			pDescItem++;
+			sg_offset = (int)sg_dma_len(sg) + buf_size;
+			break;
+		}
+
+		pDescItem++;
+		sg = sg_next(sg);
+		sg_index++;
+		sg_offset = 0;
+	}
+#endif
+
+	*pSg = sg;
+	*pSgIndex = sg_index;
+	*pSgOffset = sg_offset;
+	buf_regs->dst_dma_handle = pDstBase;
+
+#if 0
+	pr_info("%d: sg_offset=%d\n", sg_index, sg_offset);
+#endif
+
+	return (int)(pDescItem - pSgDescItems);
+}
+
+static int fill_desc_items_block(struct desc_item_t* pDescItem, int nDescItemCount,
+	struct dma_block_t** ppDescBlock, struct dma_block_t* pDescBlockEnd, int nDescBlockSize,
+	struct qvio_buf_entry* buf_entry, struct qvio_buf_regs* buf_regs) {
+	int ret;
+	struct dma_block_t* pDescBlock = *ppDescBlock;
+	int nMaxDescItemsInBlock = (nDescBlockSize >> DESC_BITSHIFT) - 1; // reserve one desc item for next/end link
+	int nDescItemsInBlock;
+	dma_addr_t pDescBase;
+	struct desc_item_t* pDescItemInBlock;
+	int64_t nDescOffset;
+
+	// prepare 1st desc block
+	ret = qvio_dma_block_alloc(pDescBlock, buf_entry->desc_pool, GFP_KERNEL | GFP_DMA);
+	if(ret) {
+		pr_err("qvio_dma_block_alloc() failed, ret=%d\n", ret);
+		goto err0;
+	}
+	nDescItemsInBlock = min(nDescItemCount, nMaxDescItemsInBlock);
+
+	pDescBase = pDescBlock->dma_handle;
+	buf_regs->desc_dma_handle = pDescBase;
+	buf_regs->desc_items = nDescItemsInBlock;
+
+	while(true) {
+		pDescItemInBlock = pDescBlock->cpu_addr;
+
+		memcpy(pDescItemInBlock, pDescItem, sizeof(struct desc_item_t) * nDescItemsInBlock);
+		pDescItem += nDescItemsInBlock;
+		nDescItemCount -= nDescItemsInBlock;
+		pDescItemInBlock += nDescItemsInBlock;
+
+		if(nDescItemCount <= 0) {
+			// end link
+			pDescItemInBlock->nOffsetHigh = 0;
+			pDescItemInBlock->nOffsetLow = 0;
+			pDescItemInBlock->nSize = 0;
+			pDescItemInBlock->nFlags = 0;
+
+			// sync current desc block to device
+			dma_sync_single_for_device(buf_entry->dev, pDescBlock->dma_handle, nDescBlockSize, DMA_TO_DEVICE);
+			break;
+		}
+
+		// alloc next desc block
+		if(++pDescBlock == pDescBlockEnd) {
+			pr_err("out of desc blocks\n");
+			ret = -ENOMEM;
+			goto err0;
+		}
+		ret = qvio_dma_block_alloc(pDescBlock, buf_entry->desc_pool, GFP_KERNEL | GFP_DMA);
+		if(ret) {
+			pr_err("qvio_dma_block_alloc() failed, ret=%d\n", ret);
+			goto err0;
+		}
+		nDescItemsInBlock = min(nDescItemCount, nMaxDescItemsInBlock);
+
+		// next link
+		nDescOffset = pDescBlock->dma_handle - pDescBase;
+		pDescItemInBlock->nOffsetHigh = ((nDescOffset >> 32) & 0xFFFFFFFF);
+		pDescItemInBlock->nOffsetLow = (nDescOffset & 0xFFFFFFFF);
+		pDescItemInBlock->nSize = nDescItemsInBlock;
+		pDescItemInBlock->nFlags = 0;
+
+		pr_warn("next link, (%llx, %d)", (int64_t)nDescOffset, nDescItemsInBlock);
+
+		// sync last desc block to device
+		dma_sync_single_for_device(buf_entry->dev, pDescBlock[-1].dma_handle, nDescBlockSize, DMA_TO_DEVICE);
+	}
+
+	*ppDescBlock = pDescBlock;
+
+	return 0;
+
+err0:
+	return ret;
+}
+
+static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, struct qvio_buffer* buf, struct qvio_buf_entry** ppBufEntry) {
+	int ret;
+	struct qvio_buf_entry* buf_entry;
+	struct desc_item_t* pSgDescItems;
+	struct scatterlist* sg;
+	int nents;
+	int sg_index;
+	int sg_offset;
+	struct dma_block_t* pDescBlock;
+	struct dma_block_t* pDescBlockEnd;
+	struct qvio_buf_regs* buf_regs;
+	int nDescItemCount;
+	int i;
+
+	buf_entry = qvio_buf_entry_new();
+	if(! buf_entry) {
+		ret = ENOMEM;
+		goto err0;
+	}
+
+	sg = sgt->sgl;
+	nents = sgt->nents;
+	sg_index = 0;
+	sg_offset = 0;
+	buf_entry->dev = self->dev;
+	buf_entry->desc_pool = self->desc_pool;
+	pDescBlock = buf_entry->desc_blocks;
+	pDescBlockEnd = buf_entry->desc_blocks + ARRAY_SIZE(buf_entry->desc_blocks);
+	buf_regs = buf_entry->buf_regs;
+
+	pSgDescItems = vmalloc(sizeof(struct desc_item_t) * nents);
+	if(! pSgDescItems) {
+		pr_err("vmalloc() failed\n");
+		ret = ENOMEM;
+		goto err1;
+	}
+
+	for(i = 0;i < self->planes;i++) {
+		// pr_info("plane %d\n", i);
+
+		skip_offset_sgt(
+			buf->offset[i],
+			&sg, nents, &sg_index, &sg_offset);
+		nDescItemCount = get_desc_items_sgt(
+			buf->stride[i] * self->format.height,
+			&sg, nents, &sg_index, &sg_offset,
+			pSgDescItems, &buf_regs[i]);
+
+		// pr_info("nDescItemCount=%d, sg_index=%d, sg_offset=%d\n", nDescItemCount, sg_index, sg_offset);
+
+		ret = fill_desc_items_block(
+			pSgDescItems, nDescItemCount,
+			&pDescBlock, pDescBlockEnd, self->desc_block_size,
+			buf_entry, &buf_regs[i]);
+		if(ret) {
+			pr_err("fill_desc_items_block() failed, ret=%d\n", ret);
+			goto err2;
+		}
+
+		sg = sgt->sgl;
+		sg_index = 0;
+		sg_offset = 0;
+	}
+
+	vfree(pSgDescItems);
+	*ppBufEntry = buf_entry;
+
+	return 0;
+
+err2:
+	vfree(pSgDescItems);
+err1:
+	qvio_buf_entry_put(buf_entry);
+err0:
+	return ret;
+}
 
 static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* buf) {
 	struct qvio_device* self = filp->private_data;
 	long ret;
+	ssize_t buf_size;
 	unsigned long start;
 	unsigned long length;
 	unsigned long first, last;
@@ -695,7 +1028,16 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 	unsigned long flags;
 
 	start = buf->u.userptr;
-	length = (unsigned long)buf->stride[0] * self->format.height; // TODO: calc by self->fmt
+
+	buf_size = calc_buf_size(&self->format, buf->offset, buf->stride);
+	if(buf_size <= 0) {
+		pr_err("unexpected value, buf_size=%ld\n", buf_size);
+		ret = buf_size;
+		goto err0;
+	}
+	// pr_info("buf_size=%lu\n", buf_size);
+
+	length = buf_size;
 	first = start >> PAGE_SHIFT;
 	last = (start + length - 1) >> PAGE_SHIFT;
 	nr = last - first + 1;
@@ -704,6 +1046,7 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 	vec = frame_vector_create(nr);
 	if(! vec) {
 		pr_err("frame_vector_create() failed\n");
+		ret = -ENOMEM;
 		goto err0;
 	}
 
@@ -723,8 +1066,9 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 	}
 
 	sgt = kmalloc(sizeof(struct sg_table), GFP_KERNEL);
-	if (ret < 0) {
-		pr_err("kmalloc() failed, err=%ld\n", ret);
+	if (! sgt) {
+		pr_err("kmalloc() failed\n");
+		ret = -ENOMEM;
 		goto err2;
 	}
 
@@ -743,7 +1087,7 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 
 	// sgt_dump(sgt, true);
 
-	ret = buf_entry_from_sgt(self, sgt, (size_t)length, &buf_entry);
+	ret = buf_entry_from_sgt(self, sgt, buf, &buf_entry);
 	if (ret) {
 		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
 		goto err5;
@@ -780,7 +1124,6 @@ static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf
 	struct dma_buf_attachment *attach;
 	struct sg_table *sgt;
 	enum dma_data_direction dma_dir = DMA_FROM_DEVICE;
-	size_t buf_size;
 	struct qvio_buf_entry* buf_entry;
 	unsigned long flags;
 
@@ -800,7 +1143,6 @@ static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf
 		ret = -EINVAL;
 		goto err1;
 	}
-	// pr_info("attach=%p\n", attach);
 
 	ret = dma_buf_begin_cpu_access(dmabuf, dma_dir);
 	if (IS_ERR(attach)) {
@@ -816,10 +1158,9 @@ static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf
 		goto err3;
 	}
 
-	// sgt_dump(&sgt, true);
+	// sgt_dump(sgt, true);
 
-	buf_size = (size_t)(buf->stride[0] * self->format.height); // TODO: calc by self->fmt
-	ret = buf_entry_from_sgt(self, sgt, buf_size, &buf_entry);
+	ret = buf_entry_from_sgt(self, sgt, buf, &buf_entry);
 	if (ret) {
 		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
 		goto err4;
@@ -852,7 +1193,7 @@ err0:
 static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) {
 	struct qvio_device* self = filp->private_data;
 	long ret;
-	size_t buf_size;
+	ssize_t buf_size;
 	void* vaddr;
 	unsigned long nr_pages;
 	struct page **pages;
@@ -862,7 +1203,12 @@ static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) 
 	struct qvio_buf_entry* buf_entry;
 	unsigned long flags;
 
-	buf_size = (size_t)(buf->stride[0] * self->format.height); // TODO: calc by self->fmt
+	buf_size = calc_buf_size(&self->format, buf->offset, buf->stride);
+	if(buf_size <= 0) {
+		pr_err("unexpected value, buf_size=%ld\n", buf_size);
+		ret = buf_size;
+		goto err0;
+	}
 	// pr_info("buf_size=%lu\n", buf_size);
 
 	vaddr = (uint8_t*)self->mmap_buffer + buf->u.offset;
@@ -874,6 +1220,7 @@ static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) 
 	pages = kmalloc(sizeof(struct page *) * nr_pages, GFP_KERNEL);
 	if (!pages) {
 		pr_err("kmalloc() failed\n");
+		ret = -ENOMEM;
 		goto err0;
 	}
 
@@ -881,13 +1228,15 @@ static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) 
 		pages[i] = vmalloc_to_page(vaddr + (i << PAGE_SHIFT));
 		if (!pages[i]) {
 			pr_err("vmalloc_to_page() failed\n");
+			ret = -ENOMEM;
 			goto err1;
 		}
 	}
 
 	sgt = kmalloc(sizeof(struct sg_table), GFP_KERNEL);
-	if (ret) {
-		pr_err("kmalloc() failed, err=%ld\n", ret);
+	if (!sgt) {
+		pr_err("kmalloc() failed\n");
+		ret = -ENOMEM;
 		goto err1;
 	}
 
@@ -905,7 +1254,7 @@ static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) 
 
 	// sgt_dump(sgt, true);
 
-	ret = buf_entry_from_sgt(self, sgt, buf_size, &buf_entry);
+	ret = buf_entry_from_sgt(self, sgt, buf, &buf_entry);
 	if (ret) {
 		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
 		goto err4;
@@ -1025,6 +1374,8 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 	XV_tpg* xTpg = &self->xTpg;
 	long ret;
 	struct qvio_buf_entry* buf_entry;
+	struct qvio_buf_regs* buf_regs;
+	struct qvio_buffer* buf;
 	u32 value;
 	u32 nIsIdle;
 	int i;
@@ -1036,17 +1387,8 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 	}
 
 	buf_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
-
-#if 0
-	pr_info("------- %llX %d %llX (%d %d %d %d)\n",
-		(int64_t)buf_entry->desc_dma_handle,
-		buf_entry->desc_items,
-		(int64_t)buf_entry->dst_dma_handle,
-		buf_entry->buf.offset[0],
-		buf_entry->buf.offset[1]);
-		buf_entry->buf.stride[0],
-		buf_entry->buf.stride[1]);
-#endif
+	buf_regs = buf_entry->buf_regs;
+	buf = &buf_entry->buf;
 
 	switch(self->work_mode) {
 	case QVIO_WORK_MODE_AXIMM_TEST0:
@@ -1096,10 +1438,10 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		XAximm_test1_DisableAutoRestart(xaximm_test1);
 		XAximm_test1_InterruptEnable(xaximm_test1, 0x1); // ap_done
 		XAximm_test1_InterruptGlobalEnable(xaximm_test1);
-		XAximm_test1_Set_pDescItem(xaximm_test1, buf_entry->desc_dma_handle);
-		XAximm_test1_Set_nDescItemCount(xaximm_test1, buf_entry->desc_items);
-		XAximm_test1_Set_pDstPxl(xaximm_test1, buf_entry->dst_dma_handle);
-		XAximm_test1_Set_nDstPxlStride(xaximm_test1, buf_entry->buf.stride[0]);
+		XAximm_test1_Set_pDescItem(xaximm_test1, buf_regs[0].desc_dma_handle);
+		XAximm_test1_Set_nDescItemCount(xaximm_test1, buf_regs[0].desc_items);
+		XAximm_test1_Set_pDstPxl(xaximm_test1, buf_regs[0].dst_dma_handle);
+		XAximm_test1_Set_nDstPxlStride(xaximm_test1, buf->stride[0]);
 		XAximm_test1_Set_nWidth(xaximm_test1, self->format.width);
 		XAximm_test1_Set_nHeight(xaximm_test1, self->format.height);
 		XAximm_test1_Start(xaximm_test1);
@@ -1133,21 +1475,35 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 			pr_err("unexpected, XV_tpg_IsIdle()=%u\n", nIsIdle);
 		}
 
-		pr_warn("TODO:....\n");
+		pr_info("---- %dx%d %d,%d %d,%d\n",
+			self->format.width, self->format.height,
+			buf->offset[0], buf->offset[1],
+			buf->stride[0], buf->stride[1]);
+
 		XZ_frmbuf_writer_DisableAutoRestart(xFrmBufWr);
 		XZ_frmbuf_writer_InterruptEnable(xFrmBufWr, 0x1); // ap_done
 		XZ_frmbuf_writer_InterruptGlobalEnable(xFrmBufWr);
-		// XZ_frmbuf_writer_Set_pDescItem(XZ_frmbuf_writer, buf_entry->desc_dma_handle);
-		// XZ_frmbuf_writer_Set_nDescItemCount(XZ_frmbuf_writer, buf_entry->desc_items);
-		// XZ_frmbuf_writer_Set_pDstPxl(XZ_frmbuf_writer, buf_entry->dst_dma_handle);
-		// XZ_frmbuf_writer_Set_nDstPxlStride(XZ_frmbuf_writer, buf_entry->buf.stride[0]);
+		XZ_frmbuf_writer_Set_pDescLuma(xFrmBufWr, buf_regs[0].desc_dma_handle);
+		XZ_frmbuf_writer_Set_nDescLumaCount(xFrmBufWr, buf_regs[0].desc_items);
+		XZ_frmbuf_writer_Set_pDstLuma(xFrmBufWr, buf_regs[0].dst_dma_handle);
+		XZ_frmbuf_writer_Set_nDstLumaStride(xFrmBufWr, buf->stride[0]);
+		XZ_frmbuf_writer_Set_pDescChroma(xFrmBufWr, buf_regs[1].desc_dma_handle);
+		XZ_frmbuf_writer_Set_nDescChromaCount(xFrmBufWr, buf_regs[1].desc_items);
+		XZ_frmbuf_writer_Set_pDstChroma(xFrmBufWr, buf_regs[1].dst_dma_handle);
+		XZ_frmbuf_writer_Set_nDstChromaStride(xFrmBufWr, buf->stride[1]);
 		XZ_frmbuf_writer_Set_nWidth(xFrmBufWr, self->format.width);
 		XZ_frmbuf_writer_Set_nHeight(xFrmBufWr, self->format.height);
 		XZ_frmbuf_writer_Start(xFrmBufWr);
 		pr_info("XZ_frmbuf_writer_Start()...\n");
 
+#if 1
 		XV_tpg_EnableAutoRestart(xTpg);
 		XV_tpg_InterruptGlobalDisable(xTpg);
+#else
+		XV_tpg_DisableAutoRestart(xTpg);
+		XV_tpg_InterruptEnable(xTpg, 0x1); // ap_done
+		XV_tpg_InterruptGlobalEnable(xTpg);
+#endif
 		XV_tpg_Set_width(xTpg, self->format.width);
 		XV_tpg_Set_height(xTpg, self->format.height);
 		XV_tpg_Start(xTpg);
@@ -1172,8 +1528,11 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 	long ret;
 	XAximm_test0* xaximm_test0 = &self->xaximm_test0;
 	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
-	int i;
+	XZ_frmbuf_writer* xFrmBufWr = &self->xFrmBufWr;
+	XV_tpg* xTpg = &self->xTpg;
+	u32 value;
 	u32 nIsIdle;
+	int i;
 	struct qvio_buf_entry* buf_entry;
 
 	switch(self->work_mode) {
@@ -1207,6 +1566,35 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 		}
 
 		XAximm_test1_InterruptClear(xaximm_test1, ISR_ALL_IRQ_MASK);
+		break;
+
+	case QVIO_WORK_MODE_FRMBUFWR:
+		pr_info("reset IP...\n"); // [x, z_frmbuf_writer, x, x, tpg]
+		value = *(u32*)((u8*)self->zzlab_env + 0x24);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x09; // 01001
+		msleep(100);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x09; // 01001
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XZ_frmbuf_writer_IsIdle(xFrmBufWr);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("nIsIdle=%u\n", nIsIdle);
+		}
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XV_tpg_IsIdle(xTpg);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("unexpected, XV_tpg_IsIdle()=%u\n", nIsIdle);
+		}
+
 		break;
 
 	default:
@@ -1548,6 +1936,8 @@ static irqreturn_t __irq_handler_xaximm_test1(int irq, void *dev_id)
 	u32 status;
 	struct qvio_buf_entry* done_entry;
 	struct qvio_buf_entry* next_entry;
+	struct qvio_buf_regs* buf_regs;
+	struct qvio_buffer* buf;
 
 #if 0
 	pr_info("AXIMM_TEST1, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
@@ -1586,25 +1976,13 @@ static irqreturn_t __irq_handler_xaximm_test1(int irq, void *dev_id)
 
 		// try to do another job
 		if(next_entry) {
-#if 0
-			pr_info("(%d, %llX, %d, %llX, %d) -> (%d, %llX, %d, %llX, %d)\n",
-				(int)done_entry->qbuf.cookie,
-				(int64_t)done_entry->desc_dma_handle,
-				(int)done_entry->desc_items,
-				(int64_t)done_entry->dst_dma_handle,
-				(int)done_entry->qbuf.stride[0],
+			buf_regs = next_entry->buf_regs;
+			buf = &next_entry->buf;
 
-				(int)next_entry->qbuf.cookie,
-				(int64_t)next_entry->desc_dma_handle,
-				(int)next_entry->desc_items,
-				(int64_t)next_entry->dst_dma_handle,
-				(int)next_entry->qbuf.stride[0]);
-#endif
-
-			XAximm_test1_Set_pDescItem(xaximm_test1, next_entry->desc_dma_handle);
-			XAximm_test1_Set_nDescItemCount(xaximm_test1, next_entry->desc_items);
-			XAximm_test1_Set_pDstPxl(xaximm_test1, next_entry->dst_dma_handle);
-			XAximm_test1_Set_nDstPxlStride(xaximm_test1, next_entry->buf.stride[0]);
+			XAximm_test1_Set_pDescItem(xaximm_test1, buf_regs[0].desc_dma_handle);
+			XAximm_test1_Set_nDescItemCount(xaximm_test1, buf_regs[0].desc_items);
+			XAximm_test1_Set_pDstPxl(xaximm_test1, buf_regs[0].dst_dma_handle);
+			XAximm_test1_Set_nDstPxlStride(xaximm_test1, buf->stride[0]);
 			XAximm_test1_Start(xaximm_test1);
 		} else {
 			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
@@ -1627,9 +2005,66 @@ static irqreturn_t __irq_handler_tpg(int irq, void *dev_id)
 static irqreturn_t __irq_handler_frmbufwr(int irq, void *dev_id)
 {
 	struct qvio_device* self = dev_id;
+	XZ_frmbuf_writer* xFrmBufWr = &self->xFrmBufWr;
+	u32 status;
+	struct qvio_buf_entry* done_entry;
+	struct qvio_buf_entry* next_entry;
+	struct qvio_buf_regs* buf_regs;
+	struct qvio_buffer* buf;
 
+#if 0
 	pr_info("FrmBufWr, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
 	self->irq_counter++;
+#endif
+
+	status = XZ_frmbuf_writer_InterruptGetStatus(xFrmBufWr);
+	if(! (status & ISR_ALL_IRQ_MASK)) {
+		pr_warn("unexpected, status=%u\n", status);
+		return IRQ_NONE;
+	}
+
+	XZ_frmbuf_writer_InterruptClear(xFrmBufWr, status & ISR_ALL_IRQ_MASK);
+
+	if(status & ISR_AP_DONE_IRQ) switch(1) { case 1:
+		if(list_empty(&self->job_list)) {
+			pr_err("self->job_list is empty\n");
+			break;
+		}
+
+		// move job from job_list to done_list
+		spin_lock(&self->lock);
+		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+		list_del(&done_entry->node);
+		// try pick next job
+		next_entry = list_empty(&self->job_list) ? NULL :
+			list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+
+		list_add_tail(&done_entry->node, &self->done_list);
+		spin_unlock(&self->lock);
+
+		// job done wake up
+		atomic_set(&self->irq_event_data, self->done_jobs++);
+		atomic_inc(&self->irq_event);
+		wake_up_interruptible(&self->irq_wait);
+
+		// try to do another job
+		if(next_entry) {
+			buf_regs = next_entry->buf_regs;
+			buf = &next_entry->buf;
+
+			XZ_frmbuf_writer_Set_pDescLuma(xFrmBufWr, buf_regs[0].desc_dma_handle);
+			XZ_frmbuf_writer_Set_nDescLumaCount(xFrmBufWr, buf_regs[0].desc_items);
+			XZ_frmbuf_writer_Set_pDstLuma(xFrmBufWr, buf_regs[0].dst_dma_handle);
+			XZ_frmbuf_writer_Set_nDstLumaStride(xFrmBufWr, buf->stride[0]);
+			XZ_frmbuf_writer_Set_pDescChroma(xFrmBufWr, buf_regs[1].desc_dma_handle);
+			XZ_frmbuf_writer_Set_nDescChromaCount(xFrmBufWr, buf_regs[1].desc_items);
+			XZ_frmbuf_writer_Set_pDstChroma(xFrmBufWr, buf_regs[1].dst_dma_handle);
+			XZ_frmbuf_writer_Set_nDstChromaStride(xFrmBufWr, buf->stride[1]);
+			XZ_frmbuf_writer_Start(xFrmBufWr);
+		} else {
+			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
+		}
+	}
 
 	return IRQ_HANDLED;
 }
@@ -1679,21 +2114,6 @@ static irqreturn_t __irq_handler_xaximm_test0(int irq, void *dev_id)
 
 		// try to do another job
 		if(next_entry) {
-#if 0
-			pr_info("(%d, %llX, %d, %llX, %d) -> (%d, %llX, %d, %llX, %d)\n",
-				(int)done_entry->qbuf.cookie,
-				(int64_t)done_entry->desc_dma_handle,
-				(int)done_entry->desc_items,
-				(int64_t)done_entry->dst_dma_handle,
-				(int)done_entry->qbuf.stride[0],
-
-				(int)next_entry->qbuf.cookie,
-				(int64_t)next_entry->desc_dma_handle,
-				(int)next_entry->desc_items,
-				(int64_t)next_entry->dst_dma_handle,
-				(int)next_entry->qbuf.stride[0]);
-#endif
-
 			XAximm_test0_Start(xaximm_test0);
 		} else {
 			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);

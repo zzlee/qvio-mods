@@ -7,6 +7,15 @@
 #include "dma_block.h"
 #include "uapi/qvio-l4t.h"
 
+#define QVIO_MAX_DESC_BLOCKS	16
+#define QVIO_MAX_PLANES			4
+
+struct qvio_buf_regs {
+	dma_addr_t desc_dma_handle;
+	u32 desc_items;
+	dma_addr_t dst_dma_handle;
+};
+
 struct qvio_buf_entry {
 	struct kref ref;
 	struct list_head node;
@@ -33,10 +42,10 @@ struct qvio_buf_entry {
 
 	// vars for descriptors building
 	struct dma_pool* desc_pool;
-	struct dma_block_t desc_blocks[8];
-	dma_addr_t desc_dma_handle;
-	u32 desc_items;
-	dma_addr_t dst_dma_handle;
+	struct dma_block_t desc_blocks[QVIO_MAX_DESC_BLOCKS];
+
+	// vars for multi-planar DMA
+	struct qvio_buf_regs buf_regs[QVIO_MAX_PLANES];
 };
 
 struct qvio_buf_entry* qvio_buf_entry_new(void);
