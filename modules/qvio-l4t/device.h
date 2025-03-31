@@ -14,6 +14,11 @@
 #include "xz_frmbuf_writer.h"
 #include "xv_tpg.h"
 
+enum qvio_state {
+	QVIO_STATE_READY,
+	QVIO_STATE_START
+};
+
 struct qvio_device {
 	struct kref ref;
 
@@ -60,6 +65,7 @@ struct qvio_device {
 	spinlock_t lock;
 	struct list_head job_list; // qvio_buf_entry
 	struct list_head done_list; // qvio_buf_entry
+	enum qvio_state state;
 
 	// irq control
 	u32 done_jobs;

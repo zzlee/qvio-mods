@@ -24,6 +24,7 @@ ccflags-y += \
 -DQVIO_MODULE_VERSION=\"$(MODULE_VERSION)\"
 
 ccflags-y += -I$(src)/../include
+ccflags-y += -I$(src)/../vitis/video_common_v4_10/src
 ccflags-y += -I$(src)/../vitis/aximm_test0_v1_0/src
 ccflags-y += -I$(src)/../vitis/aximm_test1_v1_0/src
 ccflags-y += -I${src}/../vitis/v_tpg_v8_3/src

@@ -18,6 +18,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <fstream>
 
 #include "qvio-l4t.h"
 
@@ -258,6 +259,7 @@ namespace __08_frmbufwr__ {
 					break;
 				}
 
+				bool bSnapshot = false;
 				int fd_stdin = 0; // stdin
 				while(true) {
 					fd_set readfds;
@@ -280,6 +282,9 @@ namespace __08_frmbufwr__ {
 
 						if(ch == 'q')
 							break;
+						else if(ch == 's') {
+							bSnapshot = true;
+						}
 					}
 
 					if (FD_ISSET(fd_qvio, &readfds)) {
@@ -298,6 +303,42 @@ namespace __08_frmbufwr__ {
 							nQbufs--;
 
 							nBufIdx = args.index;
+						}
+
+						if(bSnapshot) switch(1) { case 1:
+							bSnapshot = false;
+
+							err = NvBufSurfaceMap(pNVBuf_surfaces[nBufIdx], -1, -1, NVBUF_MAP_READ);
+							if(err) {
+								err = errno;
+								LOGE("%s(%d): NvBufSurfaceMap() failed, err=%d", __FUNCTION__, __LINE__, err);
+								break;
+							}
+
+							NvBufSurfaceParams& surfaceParams = pNVBuf_surfaces[nBufIdx]->surfaceList[0];
+
+							char fn[256];
+							sprintf(fn, "snapshot_%dx%d.nv16", surfaceParams.planeParams.pitch[0], nHeight);
+							LOGD("writing to %s...", fn);
+
+							LOGD("%p, %p, %d, %d, %d,%d",
+								surfaceParams.mappedAddr.addr[0], surfaceParams.mappedAddr.addr[1],
+								surfaceParams.planeParams.offset[0], surfaceParams.planeParams.offset[1],
+								surfaceParams.planeParams.pitch[0], surfaceParams.planeParams.pitch[1]);
+
+#if 1
+							std::ofstream ofs(fn, std::ios::binary);
+							ofs.write((const char*)surfaceParams.mappedAddr.addr[0] + surfaceParams.planeParams.offset[0],
+								surfaceParams.planeParams.pitch[0] * nHeight);
+							ofs.write((const char*)surfaceParams.mappedAddr.addr[1] + surfaceParams.planeParams.offset[1],
+								surfaceParams.planeParams.pitch[1] * nHeight);
+#endif
+							err = NvBufSurfaceUnMap(pNVBuf_surfaces[nBufIdx], -1, -1);
+							if(err) {
+								err = errno;
+								LOGE("%s(%d): NvBufSurfaceUnMap() failed, err=%d", __FUNCTION__, __LINE__, err);
+								break;
+							}
 						}
 
 						oStatBitRate.Log(nWidth * nHeight * 16, now);

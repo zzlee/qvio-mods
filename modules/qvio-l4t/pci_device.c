@@ -9,6 +9,8 @@
 #include <linux/pci.h>
 #include <linux/delay.h>
 
+#include "xvidc.h"
+
 #define DRV_MODULE_NAME "qvio-l4t"
 
 /* Interrupt Status and Control */
@@ -337,6 +339,89 @@ static ssize_t zzlab_ticks_show(struct device *dev, struct device_attribute *att
 		*(u32*)((u8*)self->zzlab_env + 0x1C));
 }
 
+static int start_buf_entry(struct qvio_device* self, struct qvio_buf_entry* buf_entry) {
+	int ret = 0;
+	XAximm_test0* xaximm_test0 = &self->xaximm_test0;
+	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
+	XZ_frmbuf_writer* xFrmBufWr = &self->xFrmBufWr;
+	XV_tpg* xTpg = &self->xTpg;
+	struct qvio_buf_regs* buf_regs = buf_entry->buf_regs;
+	struct qvio_buffer* buf = &buf_entry->buf;
+
+	switch(self->work_mode) {
+	case QVIO_WORK_MODE_AXIMM_TEST0:
+		XAximm_test0_DisableAutoRestart(xaximm_test0);
+		XAximm_test0_InterruptEnable(xaximm_test0, 0x1); // ap_done
+		XAximm_test0_InterruptGlobalEnable(xaximm_test0);
+		XAximm_test0_Set_pDstPxl(xaximm_test0, self->dma_blocks[0].dma_handle);
+		XAximm_test0_Set_nSize(xaximm_test0, self->desc_block_size);
+		XAximm_test0_Set_nTimes(xaximm_test0, self->format.height);
+		XAximm_test0_Start(xaximm_test0);
+		pr_info("XAximm_test0_Start()...\n");
+		break;
+
+	case QVIO_WORK_MODE_AXIMM_TEST1:
+		XAximm_test1_DisableAutoRestart(xaximm_test1);
+		XAximm_test1_InterruptEnable(xaximm_test1, 0x1); // ap_done
+		XAximm_test1_InterruptGlobalEnable(xaximm_test1);
+		XAximm_test1_Set_pDescItem(xaximm_test1, buf_regs[0].desc_dma_handle);
+		XAximm_test1_Set_nDescItemCount(xaximm_test1, buf_regs[0].desc_items);
+		XAximm_test1_Set_pDstPxl(xaximm_test1, buf_regs[0].dst_dma_handle);
+		XAximm_test1_Set_nDstPxlStride(xaximm_test1, buf->stride[0]);
+		XAximm_test1_Set_nWidth(xaximm_test1, self->format.width);
+		XAximm_test1_Set_nHeight(xaximm_test1, self->format.height);
+		XAximm_test1_Start(xaximm_test1);
+		pr_info("XAximm_test1_Start()...\n");
+		break;
+
+	case QVIO_WORK_MODE_FRMBUFWR:
+		XZ_frmbuf_writer_DisableAutoRestart(xFrmBufWr);
+		XZ_frmbuf_writer_InterruptEnable(xFrmBufWr, 0x1); // ap_done
+		XZ_frmbuf_writer_InterruptGlobalEnable(xFrmBufWr);
+		XZ_frmbuf_writer_Set_pDescLuma(xFrmBufWr, buf_regs[0].desc_dma_handle);
+		XZ_frmbuf_writer_Set_nDescLumaCount(xFrmBufWr, buf_regs[0].desc_items);
+		XZ_frmbuf_writer_Set_pDstLuma(xFrmBufWr, buf_regs[0].dst_dma_handle);
+		XZ_frmbuf_writer_Set_nDstLumaStride(xFrmBufWr, buf->stride[0]);
+		XZ_frmbuf_writer_Set_pDescChroma(xFrmBufWr, buf_regs[1].desc_dma_handle);
+		XZ_frmbuf_writer_Set_nDescChromaCount(xFrmBufWr, buf_regs[1].desc_items);
+		XZ_frmbuf_writer_Set_pDstChroma(xFrmBufWr, buf_regs[1].dst_dma_handle);
+		XZ_frmbuf_writer_Set_nDstChromaStride(xFrmBufWr, buf->stride[1]);
+		XZ_frmbuf_writer_Set_nWidth(xFrmBufWr, self->format.width);
+		XZ_frmbuf_writer_Set_nHeight(xFrmBufWr, self->format.height);
+		XZ_frmbuf_writer_Start(xFrmBufWr);
+		pr_info("XZ_frmbuf_writer_Start()...\n");
+
+#if 1
+		XV_tpg_EnableAutoRestart(xTpg);
+		XV_tpg_InterruptGlobalDisable(xTpg);
+#else
+		XV_tpg_DisableAutoRestart(xTpg);
+		XV_tpg_InterruptEnable(xTpg, 0x1); // ap_done
+		XV_tpg_InterruptGlobalEnable(xTpg);
+#endif
+		XV_tpg_Set_colorFormat(xTpg, XVIDC_CSF_YCRCB_444);
+		XV_tpg_Set_bckgndId(xTpg, XTPG_BKGND_HV_RAMP);
+		XV_tpg_Set_ovrlayId(xTpg, 0);
+		XV_tpg_Set_enableInput(xTpg, 0);
+		XV_tpg_Set_width(xTpg, self->format.width);
+		XV_tpg_Set_height(xTpg, self->format.height);
+		XV_tpg_Start(xTpg);
+		pr_info("XV_tpg_Start()...\n");
+		break;
+
+	default:
+		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
+		ret = -EINVAL;
+		goto err0;
+		break;
+	}
+
+	return 0;
+
+err0:
+	return ret;
+}
+
 static DEVICE_ATTR(dma_block, 0644, dma_block_show, dma_block_store);
 static DEVICE_ATTR(dma_block_index, 0644, dma_block_index_show, dma_block_index_store);
 static DEVICE_ATTR(test_case, 0644, test_case_show, test_case_store);
@@ -625,131 +710,6 @@ err0:
 	return ret;
 }
 
-#if 0
-static int buf_entry_from_sgt_y800(struct qvio_device* self, struct sg_table* sgt, struct qvio_buffer* buf, struct qvio_buf_entry** ppBufEntry) {
-	int ret;
-	size_t buf_size;
-	struct desc_item_t* pDescItems;
-	struct scatterlist *sg;
-	struct desc_item_t* pDescItem;
-	dma_addr_t pDstBase;
-	int i;
-	int nDescItemCount;
-	struct qvio_buf_entry* buf_entry;
-	dma_addr_t pDescBase;
-	int nMaxDescItemsInBlock;
-	int nDescItemsInBlock;
-	struct dma_block_t* desc_blocks;
-
-	buf_size = (size_t)(buf->stride[0] * self->format.height);
-
-	pDescItems = vmalloc(sizeof(struct desc_item_t) * sgt->nents);
-	if(! pDescItems) {
-		pr_err("vmalloc() failed\n");
-		ret = ENOMEM;
-		goto err0;
-	}
-
-	// build desc items by sgt
-	sg = sgt->sgl;
-	pDescItem = pDescItems;
-	pDstBase = sg_dma_address(sg);
-	// pr_info("pDstBase=%llx\n", pDstBase);
-	for (i = 0; i < sgt->nents && buf_size > 0; i++, sg = sg_next(sg), pDescItem++) {
-		int64_t nDstOffset;
-
-		nDstOffset = sg_dma_address(sg) - pDstBase;
-		pDescItem->nOffsetHigh = ((nDstOffset >> 32) & 0xFFFFFFFF);
-		pDescItem->nOffsetLow = (nDstOffset & 0xFFFFFFFF);
-		pDescItem->nSize = min(buf_size, (size_t)sg_dma_len(sg));
-		pDescItem->nFlags = 0;
-		// pr_info("%d: (%08X %08X) %08X, buf_size=%lu\n",	i, pDescItem->nOffsetHigh, pDescItem->nOffsetLow, pDescItem->nSize, buf_size);
-
-		buf_size -= pDescItem->nSize;
-	}
-	nDescItemCount = i;
-	// pr_info("nDescItemCount=%d\n", nDescItemCount);
-
-	buf_entry = qvio_buf_entry_new();
-	if(! buf_entry) {
-		ret = ENOMEM;
-		goto err1;
-	}
-
-	buf_entry->dev = self->dev;
-	buf_entry->desc_pool = self->desc_pool;
-	buf_entry->dst_dma_handle = pDstBase;
-
-	// prepare 1st desc block
-	ret = qvio_dma_block_alloc(&buf_entry->desc_blocks[0], buf_entry->desc_pool, GFP_KERNEL | GFP_DMA);
-	if(ret) {
-		pr_err("qvio_dma_block_alloc() failed, ret=%d\n", ret);
-		goto err2;
-	}
-
-	nMaxDescItemsInBlock = (self->desc_block_size >> DESC_BITSHIFT) - 1; // reserve one desc item for next/end link
-	nDescItemsInBlock = min(nDescItemCount, nMaxDescItemsInBlock);
-	buf_entry->desc_dma_handle = buf_entry->desc_blocks[0].dma_handle;
-	buf_entry->desc_items = nDescItemsInBlock;
-
-	pDescItem = pDescItems;
-	pDescBase = buf_entry->desc_blocks[0].dma_handle;
-	desc_blocks = buf_entry->desc_blocks;
-	for(i = 0;i < ARRAY_SIZE(buf_entry->desc_blocks) - 1;i++) {
-		struct desc_item_t* pDescItemInBlock = desc_blocks[i].cpu_addr;
-		int64_t nDescOffset;
-
-		memcpy(pDescItemInBlock, pDescItem, sizeof(struct desc_item_t) * nDescItemsInBlock);
-		pDescItem += nDescItemsInBlock;
-		nDescItemCount -= nDescItemsInBlock;
-		pDescItemInBlock += nDescItemsInBlock;
-
-		if(nDescItemCount <= 0) {
-			// end link
-			pDescItemInBlock->nOffsetHigh = 0;
-			pDescItemInBlock->nOffsetLow = 0;
-			pDescItemInBlock->nSize = 0;
-			pDescItemInBlock->nFlags = 0;
-
-			dma_sync_single_for_device(buf_entry->dev, desc_blocks[i].dma_handle, self->desc_block_size, DMA_TO_DEVICE);
-			break;
-		}
-
-		nDescItemsInBlock = min(nDescItemCount, nMaxDescItemsInBlock);
-
-		// alloc next desc block
-		ret = qvio_dma_block_alloc(&desc_blocks[i + 1], buf_entry->desc_pool, GFP_KERNEL | GFP_DMA);
-		if(ret) {
-			pr_err("qvio_dma_block_alloc() failed, ret=%d\n", ret);
-			goto err2;
-		}
-
-		// next link
-		nDescOffset = desc_blocks[i + 1].dma_handle - pDescBase;
-		pDescItemInBlock->nOffsetHigh = ((nDescOffset >> 32) & 0xFFFFFFFF);
-		pDescItemInBlock->nOffsetLow = (nDescOffset & 0xFFFFFFFF);
-		pDescItemInBlock->nSize = nDescItemsInBlock;
-		pDescItemInBlock->nFlags = 0;
-
-		pr_warn("%d: next link, nDescOffset=%llx, nDescItemsInBlock=%d", i, (int64_t)nDescOffset, nDescItemsInBlock);
-
-		dma_sync_single_for_device(buf_entry->dev, buf_entry->desc_blocks[i].dma_handle, self->desc_block_size, DMA_TO_DEVICE);
-	}
-	vfree(pDescItems);
-
-	*ppBufEntry = buf_entry;
-
-	return 0;
-
-err2:
-	qvio_buf_entry_put(buf_entry);
-err1:
-	vfree(pDescItems);
-err0:
-	return ret;
-}
-#endif
-
 static void skip_offset_sgt(int offset, struct scatterlist** pSg, int nents, int* pSgIndex, int* pSgOffset) {
 	struct scatterlist* sg = *pSg;
 	int sg_index = *pSgIndex;
@@ -1025,6 +985,7 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 	struct sg_table* sgt;
 	enum dma_data_direction dma_dir = DMA_FROM_DEVICE;
 	struct qvio_buf_entry* buf_entry;
+	struct qvio_buf_entry* next_entry;
 	unsigned long flags;
 
 	start = buf->u.userptr;
@@ -1098,8 +1059,13 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 	buf_entry->u.userptr.sgt = sgt;
 
 	spin_lock_irqsave(&self->lock, flags);
+	next_entry = list_empty(&self->job_list) ? buf_entry : NULL;
 	list_add_tail(&buf_entry->node, &self->job_list);
 	spin_unlock_irqrestore(&self->lock, flags);
+
+	if(self->state == QVIO_STATE_START && next_entry) {
+		start_buf_entry(self, next_entry);
+	}
 
 	return 0;
 
@@ -1125,6 +1091,7 @@ static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf
 	struct sg_table *sgt;
 	enum dma_data_direction dma_dir = DMA_FROM_DEVICE;
 	struct qvio_buf_entry* buf_entry;
+	struct qvio_buf_entry* next_entry;
 	unsigned long flags;
 
 	dmabuf = dma_buf_get(buf->u.fd);
@@ -1173,8 +1140,13 @@ static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf
 	buf_entry->u.dmabuf.sgt = sgt;
 
 	spin_lock_irqsave(&self->lock, flags);
+	next_entry = list_empty(&self->job_list) ? buf_entry : NULL;
 	list_add_tail(&buf_entry->node, &self->job_list);
 	spin_unlock_irqrestore(&self->lock, flags);
+
+	if(self->state == QVIO_STATE_START && next_entry) {
+		start_buf_entry(self, next_entry);
+	}
 
 	return 0;
 
@@ -1201,6 +1173,7 @@ static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) 
 	struct sg_table* sgt;
 	enum dma_data_direction dma_dir = DMA_FROM_DEVICE;
 	struct qvio_buf_entry* buf_entry;
+	struct qvio_buf_entry* next_entry;
 	unsigned long flags;
 
 	buf_size = calc_buf_size(&self->format, buf->offset, buf->stride);
@@ -1265,8 +1238,13 @@ static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) 
 	buf_entry->u.userptr.sgt = sgt;
 
 	spin_lock_irqsave(&self->lock, flags);
+	next_entry = list_empty(&self->job_list) ? buf_entry : NULL;
 	list_add_tail(&buf_entry->node, &self->job_list);
 	spin_unlock_irqrestore(&self->lock, flags);
+
+	if(self->state == QVIO_STATE_START && next_entry) {
+		start_buf_entry(self, next_entry);
+	}
 
 	kfree(pages);
 
@@ -1374,25 +1352,19 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 	XV_tpg* xTpg = &self->xTpg;
 	long ret;
 	struct qvio_buf_entry* buf_entry;
-	struct qvio_buf_regs* buf_regs;
-	struct qvio_buffer* buf;
 	u32 value;
 	u32 nIsIdle;
 	int i;
 
-	if(list_empty(&self->job_list)) {
-		pr_warn("job list not empty!!\n");
-		ret = -EPERM;
+	if(self->state == QVIO_STATE_START) {
+		pr_err("unexpected value, self->state=%d\n", self->state);
+		ret = -EINVAL;
 		goto err0;
 	}
 
-	buf_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
-	buf_regs = buf_entry->buf_regs;
-	buf = &buf_entry->buf;
-
 	switch(self->work_mode) {
 	case QVIO_WORK_MODE_AXIMM_TEST0:
-		pr_info("reset IP...\n"); // [aximm_test0, x, x, x, x]
+		pr_info("reset aximm_test0...\n"); // [aximm_test0, x, x, x, x]
 		value = *(u32*)((u8*)self->zzlab_env + 0x24);
 		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x10; // 10000
 		msleep(100);
@@ -1407,19 +1379,10 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		if(! nIsIdle) {
 			pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
 		}
-
-		XAximm_test0_DisableAutoRestart(xaximm_test0);
-		XAximm_test0_InterruptEnable(xaximm_test0, 0x1); // ap_done
-		XAximm_test0_InterruptGlobalEnable(xaximm_test0);
-		XAximm_test0_Set_pDstPxl(xaximm_test0, self->dma_blocks[0].dma_handle);
-		XAximm_test0_Set_nSize(xaximm_test0, self->desc_block_size);
-		XAximm_test0_Set_nTimes(xaximm_test0, self->format.height);
-		XAximm_test0_Start(xaximm_test0);
-		pr_info("XAximm_test0_Start()...\n");
 		break;
 
 	case QVIO_WORK_MODE_AXIMM_TEST1:
-		pr_info("reset IP...\n"); // [x, x, aximm_test1, x, x]
+		pr_info("reset aximm_test1...\n"); // [x, x, aximm_test1, x, x]
 		value = *(u32*)((u8*)self->zzlab_env + 0x24);
 		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x04; // 00100
 		msleep(100);
@@ -1434,22 +1397,10 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		if(! nIsIdle) {
 			pr_err("nIsIdle=%u\n", nIsIdle);
 		}
-
-		XAximm_test1_DisableAutoRestart(xaximm_test1);
-		XAximm_test1_InterruptEnable(xaximm_test1, 0x1); // ap_done
-		XAximm_test1_InterruptGlobalEnable(xaximm_test1);
-		XAximm_test1_Set_pDescItem(xaximm_test1, buf_regs[0].desc_dma_handle);
-		XAximm_test1_Set_nDescItemCount(xaximm_test1, buf_regs[0].desc_items);
-		XAximm_test1_Set_pDstPxl(xaximm_test1, buf_regs[0].dst_dma_handle);
-		XAximm_test1_Set_nDstPxlStride(xaximm_test1, buf->stride[0]);
-		XAximm_test1_Set_nWidth(xaximm_test1, self->format.width);
-		XAximm_test1_Set_nHeight(xaximm_test1, self->format.height);
-		XAximm_test1_Start(xaximm_test1);
-		pr_info("XAximm_test1_Start()...\n");
 		break;
 
 	case QVIO_WORK_MODE_FRMBUFWR:
-		pr_info("reset IP...\n"); // [x, z_frmbuf_writer, x, x, tpg]
+		pr_info("reset z_frmbuf_writer, tpg...\n"); // [x, z_frmbuf_writer, x, x, tpg]
 		value = *(u32*)((u8*)self->zzlab_env + 0x24);
 		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x09; // 01001
 		msleep(100);
@@ -1474,40 +1425,6 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		if(! nIsIdle) {
 			pr_err("unexpected, XV_tpg_IsIdle()=%u\n", nIsIdle);
 		}
-
-		pr_info("---- %dx%d %d,%d %d,%d\n",
-			self->format.width, self->format.height,
-			buf->offset[0], buf->offset[1],
-			buf->stride[0], buf->stride[1]);
-
-		XZ_frmbuf_writer_DisableAutoRestart(xFrmBufWr);
-		XZ_frmbuf_writer_InterruptEnable(xFrmBufWr, 0x1); // ap_done
-		XZ_frmbuf_writer_InterruptGlobalEnable(xFrmBufWr);
-		XZ_frmbuf_writer_Set_pDescLuma(xFrmBufWr, buf_regs[0].desc_dma_handle);
-		XZ_frmbuf_writer_Set_nDescLumaCount(xFrmBufWr, buf_regs[0].desc_items);
-		XZ_frmbuf_writer_Set_pDstLuma(xFrmBufWr, buf_regs[0].dst_dma_handle);
-		XZ_frmbuf_writer_Set_nDstLumaStride(xFrmBufWr, buf->stride[0]);
-		XZ_frmbuf_writer_Set_pDescChroma(xFrmBufWr, buf_regs[1].desc_dma_handle);
-		XZ_frmbuf_writer_Set_nDescChromaCount(xFrmBufWr, buf_regs[1].desc_items);
-		XZ_frmbuf_writer_Set_pDstChroma(xFrmBufWr, buf_regs[1].dst_dma_handle);
-		XZ_frmbuf_writer_Set_nDstChromaStride(xFrmBufWr, buf->stride[1]);
-		XZ_frmbuf_writer_Set_nWidth(xFrmBufWr, self->format.width);
-		XZ_frmbuf_writer_Set_nHeight(xFrmBufWr, self->format.height);
-		XZ_frmbuf_writer_Start(xFrmBufWr);
-		pr_info("XZ_frmbuf_writer_Start()...\n");
-
-#if 1
-		XV_tpg_EnableAutoRestart(xTpg);
-		XV_tpg_InterruptGlobalDisable(xTpg);
-#else
-		XV_tpg_DisableAutoRestart(xTpg);
-		XV_tpg_InterruptEnable(xTpg, 0x1); // ap_done
-		XV_tpg_InterruptGlobalEnable(xTpg);
-#endif
-		XV_tpg_Set_width(xTpg, self->format.width);
-		XV_tpg_Set_height(xTpg, self->format.height);
-		XV_tpg_Start(xTpg);
-		pr_info("XV_tpg_Start()...\n");
 		break;
 
 	default:
@@ -1516,6 +1433,17 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		goto err0;
 		break;
 	}
+
+	if(! list_empty(&self->job_list)) {
+		buf_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+		ret = start_buf_entry(self, buf_entry);
+		if(ret) {
+			pr_err("start_buf_entry() failed, err=%d\n", (int)ret);
+			goto err0;
+		}
+	}
+
+	self->state = QVIO_STATE_START;
 
 	return 0;
 
@@ -1534,6 +1462,12 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 	u32 nIsIdle;
 	int i;
 	struct qvio_buf_entry* buf_entry;
+
+	if(self->state == QVIO_STATE_READY) {
+		pr_err("unexpected value, self->state=%d\n", self->state);
+		ret = -EINVAL;
+		goto err0;
+	}
 
 	switch(self->work_mode) {
 	case QVIO_WORK_MODE_AXIMM_TEST0:
@@ -1628,6 +1562,8 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 	atomic_set(&self->irq_event, 0);
 	self->irq_event_count = atomic_read(&self->irq_event);
 	atomic_set(&self->irq_event_data, 0);
+
+	self->state = QVIO_STATE_READY;
 
 	return 0;
 
@@ -2325,68 +2261,6 @@ static void remove_dev_attrs(struct device* dev) {
 	device_remove_file(dev, &dev_attr_dma_block);
 }
 
-#if 0
-static void test_vmalloc_user(struct device* dev) {
-	int ret;
-	int size;
-	void* vaddr;
-	unsigned long nr_pages;
-	struct page **pages;
-	unsigned long i;
-	struct sg_table sgt;
-
-	size = 4096*2160*2;
-	vaddr = vmalloc_user(size);
-	if(! vaddr) {
-		pr_err("vmalloc_user() failed\n");
-		goto err0;
-	}
-	pr_info("vaddr=%llX\n", (int64_t)vaddr);
-
-	nr_pages = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
-	pr_info("nr_pages=%lu\n", nr_pages);
-
-	pages = kmalloc(sizeof(struct page *) * nr_pages, GFP_KERNEL);
-	if (!pages) {
-		pr_err("kmalloc() failed\n");
-		goto err1;
-	}
-
-	for (i = 0; i < nr_pages; i++) {
-		pages[i] = vmalloc_to_page(vaddr + (i << PAGE_SHIFT));
-		if (!pages[i]) {
-			pr_err("vmalloc_to_page() failed\n");
-			goto err2;
-		}
-	}
-
-	ret = sg_alloc_table_from_pages(&sgt, pages, nr_pages, 0, size, GFP_KERNEL);
-	if (ret) {
-		pr_err("sg_alloc_table_from_pages() failed, err=%d\n", ret);
-		goto err2;
-	}
-
-	ret = dma_map_sg(dev, sgt.sgl, sgt.nents, DMA_FROM_DEVICE);
-	if (ret <= 0) {
-		pr_err("dma_map_sg() failed, err=%d\n", ret);
-		goto err3;
-	}
-
-	sgt_dump(&sgt, true);
-
-// err4:
-	dma_unmap_sg(dev, sgt.sgl, sgt.nents, DMA_FROM_DEVICE);
-err3:
-	sg_free_table(&sgt);
-err2:
-	kfree(pages);
-err1:
-	vfree(vaddr);
-err0:
-	return;
-}
-#endif
-
 static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	int err = 0;
 	struct qvio_device* self;
@@ -2395,10 +2269,6 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 
 	pr_info("%04X:%04X (%04X:%04X)\n", (int)pdev->vendor, (int)pdev->device,
 		(int)pdev->subsystem_vendor, (int)pdev->subsystem_device);
-
-#if 0
-	test_vmalloc_user(&pdev->dev);
-#endif
 
 	self = qvio_device_new();
 	if(! self) {
