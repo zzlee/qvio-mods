@@ -19,11 +19,7 @@ struct qvio_device* qvio_device_new(void) {
 	INIT_LIST_HEAD(&self->done_list);
 	self->state = QVIO_STATE_READY;
 
-	self->done_jobs = 0;
 	init_waitqueue_head(&self->irq_wait);
-	atomic_set(&self->irq_event, 0);
-	self->irq_event_count = atomic_read(&self->irq_event);
-	atomic_set(&self->irq_event_data, 0);
 
 	return self;
 

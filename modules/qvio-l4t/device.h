@@ -68,10 +68,6 @@ struct qvio_device {
 	enum qvio_state state;
 
 	// irq control
-	u32 done_jobs;
-	atomic_t irq_event;
-	u32 irq_event_count;
-	atomic_t irq_event_data;
 	wait_queue_head_t irq_wait;
 };
 

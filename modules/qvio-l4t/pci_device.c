@@ -75,14 +75,12 @@ static ssize_t calc_buf_size(struct qvio_format* format, __u32 offset[4], __u32 
 		ret = (ssize_t)(offset[0] + stride[0] * format->height);
 		break;
 
-	case FOURCC_NV16:
-		ret = (ssize_t)(offset[0] + stride[0] * format->height +
-			offset[1] + stride[1] * format->height);
+	case FOURCC_NV16: // notice! offset[1] covers plane-0
+		ret = (ssize_t)(offset[1] + stride[1] * format->height);
 		break;
 
-	case FOURCC_NV12:
-		ret = (ssize_t)(offset[0] + stride[0] * format->height +
-			offset[1] + stride[1] * (format->height >> 1));
+	case FOURCC_NV12: // notice! offset[1] covers plane-0
+		ret = (ssize_t)(offset[1] + stride[1] * (format->height >> 1));
 		break;
 
 	default:
@@ -400,7 +398,7 @@ static int start_buf_entry(struct qvio_device* self, struct qvio_buf_entry* buf_
 		XV_tpg_InterruptGlobalEnable(xTpg);
 #endif
 		XV_tpg_Set_colorFormat(xTpg, XVIDC_CSF_YCRCB_444);
-		XV_tpg_Set_bckgndId(xTpg, XTPG_BKGND_HV_RAMP);
+		XV_tpg_Set_bckgndId(xTpg, XTPG_BKGND_V_RAMP);
 		XV_tpg_Set_ovrlayId(xTpg, 0);
 		XV_tpg_Set_enableInput(xTpg, 0);
 		XV_tpg_Set_width(xTpg, self->format.width);
@@ -447,7 +445,7 @@ static __poll_t __file_poll(struct file *filp, struct poll_table_struct *wait) {
 
 	poll_wait(filp, &self->irq_wait, wait);
 
-	if (self->irq_event_count != atomic_read(&self->irq_event))
+	if (! list_empty(&self->done_list))
 		return EPOLLIN | EPOLLRDNORM;
 
 	return 0;
@@ -1039,10 +1037,9 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 		goto err3;
 	}
 
-	ret = dma_map_sg(self->dev, sgt->sgl, sgt->nents, dma_dir);
-	if (ret <= 0) {
-		pr_err("dma_map_sg() failed, err=%ld\n", ret);
-		ret = -EPERM;
+	ret = dma_map_sgtable(self->dev, sgt, dma_dir, DMA_ATTR_SKIP_CPU_SYNC);
+	if (ret) {
+		pr_err("dma_map_sgtable() failed, err=%ld\n", ret);
 		goto err4;
 	}
 
@@ -1063,14 +1060,16 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 	list_add_tail(&buf_entry->node, &self->job_list);
 	spin_unlock_irqrestore(&self->lock, flags);
 
+#if 1
 	if(self->state == QVIO_STATE_START && next_entry) {
 		start_buf_entry(self, next_entry);
 	}
+#endif
 
 	return 0;
 
 err5:
-	dma_unmap_sg(self->dev, sgt->sgl, sgt->nents, dma_dir);
+	dma_unmap_sgtable(self->dev, sgt, dma_dir, DMA_ATTR_SKIP_CPU_SYNC);
 err4:
 	sg_free_table(sgt);
 err3:
@@ -1112,8 +1111,8 @@ static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf
 	}
 
 	ret = dma_buf_begin_cpu_access(dmabuf, dma_dir);
-	if (IS_ERR(attach)) {
-		pr_err("dma_buf_begin_cpu_access() failed, attach=%p\n", attach);
+	if (ret) {
+		pr_err("dma_buf_begin_cpu_access() failed, ret=%ld\n", ret);
 		goto err2;
 	}
 
@@ -1144,9 +1143,11 @@ static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf
 	list_add_tail(&buf_entry->node, &self->job_list);
 	spin_unlock_irqrestore(&self->lock, flags);
 
+#if 1
 	if(self->state == QVIO_STATE_START && next_entry) {
 		start_buf_entry(self, next_entry);
 	}
+#endif
 
 	return 0;
 
@@ -1219,9 +1220,9 @@ static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) 
 		goto err2;
 	}
 
-	ret = dma_map_sg(self->dev, sgt->sgl, sgt->nents, dma_dir);
-	if (ret <= 0) {
-		pr_err("dma_map_sg() failed, err=%ld\n", ret);
+	ret = dma_map_sgtable(self->dev, sgt, dma_dir, DMA_ATTR_SKIP_CPU_SYNC);
+	if (ret) {
+		pr_err("dma_map_sgtable() failed, err=%ld\n", ret);
 		goto err3;
 	}
 
@@ -1242,16 +1243,18 @@ static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) 
 	list_add_tail(&buf_entry->node, &self->job_list);
 	spin_unlock_irqrestore(&self->lock, flags);
 
+#if 1
 	if(self->state == QVIO_STATE_START && next_entry) {
 		start_buf_entry(self, next_entry);
 	}
+#endif
 
 	kfree(pages);
 
 	return 0;
 
 err4:
-	dma_unmap_sg(self->dev, sgt->sgl, sgt->nents, dma_dir);
+	dma_unmap_sgtable(self->dev, sgt, dma_dir, DMA_ATTR_SKIP_CPU_SYNC);
 err3:
 	sg_free_table(sgt);
 err2:
@@ -1302,25 +1305,18 @@ err0:
 static long __file_ioctl_dqbuf(struct file * filp, unsigned long arg) {
 	struct qvio_device* self = filp->private_data;
 	long ret;
-	u32 event_count;
 	unsigned long flags;
 	struct qvio_buf_entry* buf_entry;
 	struct qvio_buffer args;
 
-	event_count = atomic_read(&self->irq_event);
-	if (event_count == self->irq_event_count) {
-		ret = -EAGAIN;
-		goto err0;
-	}
-
-	if(list_empty(&self->done_list)) {
-		ret = -EAGAIN;
-		goto err0;
-	}
-
-	self->irq_event_count = event_count;
-
 	spin_lock_irqsave(&self->lock, flags);
+	if(list_empty(&self->done_list)) {
+		spin_unlock_irqrestore(&self->lock, flags);
+
+		ret = -EAGAIN;
+		goto err0;
+	}
+
 	buf_entry = list_first_entry(&self->done_list, struct qvio_buf_entry, node);
 	list_del(&buf_entry->node);
 	spin_unlock_irqrestore(&self->lock, flags);
@@ -1461,6 +1457,7 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 	u32 value;
 	u32 nIsIdle;
 	int i;
+	unsigned long flags;
 	struct qvio_buf_entry* buf_entry;
 
 	if(self->state == QVIO_STATE_READY) {
@@ -1503,21 +1500,13 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 		break;
 
 	case QVIO_WORK_MODE_FRMBUFWR:
-		pr_info("reset IP...\n"); // [x, z_frmbuf_writer, x, x, tpg]
-		value = *(u32*)((u8*)self->zzlab_env + 0x24);
-		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x09; // 01001
-		msleep(100);
-		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x09; // 01001
+		XZ_frmbuf_writer_InterruptGlobalDisable(xFrmBufWr);
 
-		for(i = 0;i < 5;i++) {
-			nIsIdle = XZ_frmbuf_writer_IsIdle(xFrmBufWr);
-			if(nIsIdle)
-				break;
-			msleep(100);
-		}
-		if(! nIsIdle) {
-			pr_err("nIsIdle=%u\n", nIsIdle);
-		}
+		pr_info("reset tpg...\n"); // [x, x, x, x, tpg]
+		value = *(u32*)((u8*)self->zzlab_env + 0x24);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x01; // 00001
+		msleep(100);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x01; // 00001
 
 		for(i = 0;i < 5;i++) {
 			nIsIdle = XV_tpg_IsIdle(xTpg);
@@ -1529,6 +1518,21 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 			pr_err("unexpected, XV_tpg_IsIdle()=%u\n", nIsIdle);
 		}
 
+		pr_info("reset z_frmbuf_writer...\n"); // [x, z_frmbuf_writer, x, x, x]
+		value = *(u32*)((u8*)self->zzlab_env + 0x24);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x08; // 01000
+		msleep(100);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x08; // 01000
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XZ_frmbuf_writer_IsIdle(xFrmBufWr);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("nIsIdle=%u\n", nIsIdle);
+		}
 		break;
 
 	default:
@@ -1538,6 +1542,7 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 		break;
 	}
 
+	spin_lock_irqsave(&self->lock, flags);
 	if(! list_empty(&self->job_list)) {
 		pr_warn("job list is not empty!!\n");
 
@@ -1557,11 +1562,7 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 			qvio_buf_entry_put(buf_entry);
 		}
 	}
-
-	self->done_jobs = 0;
-	atomic_set(&self->irq_event, 0);
-	self->irq_event_count = atomic_read(&self->irq_event);
-	atomic_set(&self->irq_event_data, 0);
+	spin_unlock_irqrestore(&self->lock, flags);
 
 	self->state = QVIO_STATE_READY;
 
@@ -1889,13 +1890,14 @@ static irqreturn_t __irq_handler_xaximm_test1(int irq, void *dev_id)
 	XAximm_test1_InterruptClear(xaximm_test1, status & ISR_ALL_IRQ_MASK);
 
 	if(status & ISR_AP_DONE_IRQ) switch(1) { case 1:
+		spin_lock(&self->lock);
 		if(list_empty(&self->job_list)) {
+			spin_unlock(&self->lock);
 			pr_err("self->job_list is empty\n");
 			break;
 		}
 
 		// move job from job_list to done_list
-		spin_lock(&self->lock);
 		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
 		list_del(&done_entry->node);
 		// try pick next job
@@ -1906,8 +1908,6 @@ static irqreturn_t __irq_handler_xaximm_test1(int irq, void *dev_id)
 		spin_unlock(&self->lock);
 
 		// job done wake up
-		atomic_set(&self->irq_event_data, self->done_jobs++);
-		atomic_inc(&self->irq_event);
 		wake_up_interruptible(&self->irq_wait);
 
 		// try to do another job
@@ -1962,13 +1962,14 @@ static irqreturn_t __irq_handler_frmbufwr(int irq, void *dev_id)
 	XZ_frmbuf_writer_InterruptClear(xFrmBufWr, status & ISR_ALL_IRQ_MASK);
 
 	if(status & ISR_AP_DONE_IRQ) switch(1) { case 1:
+		spin_lock(&self->lock);
 		if(list_empty(&self->job_list)) {
+			spin_unlock(&self->lock);
 			pr_err("self->job_list is empty\n");
 			break;
 		}
 
 		// move job from job_list to done_list
-		spin_lock(&self->lock);
 		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
 		list_del(&done_entry->node);
 		// try pick next job
@@ -1979,8 +1980,6 @@ static irqreturn_t __irq_handler_frmbufwr(int irq, void *dev_id)
 		spin_unlock(&self->lock);
 
 		// job done wake up
-		atomic_set(&self->irq_event_data, self->done_jobs++);
-		atomic_inc(&self->irq_event);
 		wake_up_interruptible(&self->irq_wait);
 
 		// try to do another job
@@ -1997,6 +1996,7 @@ static irqreturn_t __irq_handler_frmbufwr(int irq, void *dev_id)
 			XZ_frmbuf_writer_Set_pDstChroma(xFrmBufWr, buf_regs[1].dst_dma_handle);
 			XZ_frmbuf_writer_Set_nDstChromaStride(xFrmBufWr, buf->stride[1]);
 			XZ_frmbuf_writer_Start(xFrmBufWr);
+			// pr_warn("XZ_frmbuf_writer_Start\n");
 		} else {
 			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
 		}
@@ -2027,13 +2027,14 @@ static irqreturn_t __irq_handler_xaximm_test0(int irq, void *dev_id)
 	XAximm_test0_InterruptClear(xaximm_test0, status & ISR_ALL_IRQ_MASK);
 
 	if(status & ISR_AP_DONE_IRQ) switch(1) { case 1:
+		spin_lock(&self->lock);
 		if(list_empty(&self->job_list)) {
+			spin_unlock(&self->lock);
 			pr_err("self->job_list is empty\n");
 			break;
 		}
 
 		// move job from job_list to done_list
-		spin_lock(&self->lock);
 		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
 		list_del(&done_entry->node);
 		// try pick next job
@@ -2044,8 +2045,6 @@ static irqreturn_t __irq_handler_xaximm_test0(int irq, void *dev_id)
 		spin_unlock(&self->lock);
 
 		// job done wake up
-		atomic_set(&self->irq_event_data, self->done_jobs++);
-		atomic_inc(&self->irq_event);
 		wake_up_interruptible(&self->irq_wait);
 
 		// try to do another job
@@ -2266,6 +2265,7 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	struct qvio_device* self;
 	int i;
 	u32 nIsIdle;
+	u32 value;
 
 	pr_info("%04X:%04X (%04X:%04X)\n", (int)pdev->vendor, (int)pdev->device,
 		(int)pdev->subsystem_vendor, (int)pdev->subsystem_device);
@@ -2344,9 +2344,10 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 
 #if 1
 	pr_info("reset all IPs...\n"); // [aximm_test0, z_frmbuf_writer, aximm_test1, pcie_intr, tpg]
-	*(u32*)((u8*)self->zzlab_env + 0x24) = 0x02; // 00010
+	value = *(u32*)((u8*)self->zzlab_env + 0x24);
+	*(u32*)((u8*)self->zzlab_env + 0x24) = value | ~0x1F; // 11111
 	msleep(100);
-	*(u32*)((u8*)self->zzlab_env + 0x24) = 0x1D; // 11101
+	*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x1F; // 11111
 #endif
 
 	self->xaximm_test0.Control_BaseAddress = (u64)self->bar[0] + 0x40000;
@@ -2406,7 +2407,7 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 		msleep(100);
 	}
 	if(! nIsIdle) {
-		pr_err("unexpected, XZ_frmbuf_writer_IsIdle()=%u\n", nIsIdle);
+		pr_err("nIsIdle=%u\n", nIsIdle);
 	}
 
 	for(i = 0;i < 5;i++) {

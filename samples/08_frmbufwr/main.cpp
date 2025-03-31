@@ -55,6 +55,7 @@ namespace __08_frmbufwr__ {
 
 		int nWidth;
 		int nHeight;
+		int nStride;
 		int nBuffers;
 
 		int fd_qvio;
@@ -78,6 +79,7 @@ namespace __08_frmbufwr__ {
 
 			nWidth = 4096;
 			nHeight = 2160;
+			nStride = nWidth;
 			nBuffers = 4;
 
 			switch(1) { case 1:
@@ -161,6 +163,23 @@ namespace __08_frmbufwr__ {
 					break;
 #endif // BUILD_WITH_NVBUF
 
+				pSysBufs.resize(nBuffers);
+				for(int i = 0;i < pSysBufs.size();i++) {
+					void *memptr;
+					err = posix_memalign(&memptr, 4096, nStride * nHeight * 2);
+					if (err) {
+						LOGE("%s(%d): posix_memalign failed, err=%d", __FUNCTION__, __LINE__, err);
+						break;
+					}
+					oFreeStack += [memptr]() {
+						free(memptr);
+					};
+
+					pSysBufs[i] = (uint8_t*)memptr;
+				}
+				if(err < 0)
+					break;
+
 				ZzUtils::TestLoop([&](int ch) -> int {
 					int err = 0;
 
@@ -175,6 +194,10 @@ namespace __08_frmbufwr__ {
 						case '2':
 							OnTest2(now);
 							break;
+
+						case '3':
+							OnTest3(now);
+							break;
 						}
 					}
 
@@ -185,6 +208,7 @@ namespace __08_frmbufwr__ {
 			return err;
 		}
 
+#if BUILD_WITH_NVBUF
 		int EnqueueBuffer_nvbuf(int nIndex) {
 			int err = 0;
 
@@ -200,6 +224,31 @@ namespace __08_frmbufwr__ {
 				args.offset[1] = surfaceParams.planeParams.offset[1];
 				args.stride[0] = surfaceParams.planeParams.pitch[0];
 				args.stride[1] = surfaceParams.planeParams.pitch[1];
+				err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
+				if(err) {
+					err = errno;
+					LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
+					break;
+				}
+			}
+
+			return err;
+		}
+#endif // BUILD_WITH_NVBUF
+
+		int EnqueueBuffer_sysbuf(int nIndex) {
+			int err = 0;
+
+			switch(1) { case 1:
+				qvio_buffer args;
+				memset(&args, 0, sizeof(args));
+				args.index = nIndex;
+				args.buf_type = QVIO_BUF_TYPE_USERPTR;
+				args.u.userptr = (unsigned long)pSysBufs[nIndex];
+				args.offset[0] = 0;
+				args.stride[0] = nStride;
+				args.offset[1] = nStride * nHeight;
+				args.stride[1] = nStride;
 				err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
 				if(err) {
 					err = errno;
@@ -318,19 +367,14 @@ namespace __08_frmbufwr__ {
 							NvBufSurfaceParams& surfaceParams = pNVBuf_surfaces[nBufIdx]->surfaceList[0];
 
 							char fn[256];
-							sprintf(fn, "snapshot_%dx%d.nv16", surfaceParams.planeParams.pitch[0], nHeight);
+							sprintf(fn, "nvbuf_%dx%d.nv16", surfaceParams.planeParams.pitch[0], nHeight);
 							LOGD("writing to %s...", fn);
-
-							LOGD("%p, %p, %d, %d, %d,%d",
-								surfaceParams.mappedAddr.addr[0], surfaceParams.mappedAddr.addr[1],
-								surfaceParams.planeParams.offset[0], surfaceParams.planeParams.offset[1],
-								surfaceParams.planeParams.pitch[0], surfaceParams.planeParams.pitch[1]);
 
 #if 1
 							std::ofstream ofs(fn, std::ios::binary);
-							ofs.write((const char*)surfaceParams.mappedAddr.addr[0] + surfaceParams.planeParams.offset[0],
+							ofs.write((const char*)surfaceParams.mappedAddr.addr[0],
 								surfaceParams.planeParams.pitch[0] * nHeight);
-							ofs.write((const char*)surfaceParams.mappedAddr.addr[1] + surfaceParams.planeParams.offset[1],
+							ofs.write((const char*)surfaceParams.mappedAddr.addr[1],
 								surfaceParams.planeParams.pitch[1] * nHeight);
 #endif
 							err = NvBufSurfaceUnMap(pNVBuf_surfaces[nBufIdx], -1, -1);
@@ -354,13 +398,56 @@ namespace __08_frmbufwr__ {
 					}
 				}
 
-#if 1
-				LOGD("Flushing all pending buffers...");
-				while(nQbufs > 0) {
+				LOGD("QVIO_IOC_STREAMOFF...");
+				err = ioctl(fd_qvio, QVIO_IOC_STREAMOFF);
+				if(err) {
+					err = errno;
+					LOGE("%s(%d): ioctl(QVIO_IOC_STREAMOFF) failed, err=%d", __FUNCTION__, __LINE__, err);
+					break;
+				}
+			}
+#endif // BUILD_WITH_NVBUF
+		}
+
+		void OnTest3(int64_t now) {
+			int err;
+
+			switch(1) { case 1:
+				LOGD("QVIO_IOC_QBUF...");
+				int nQbufs = 0;
+				for(int i = 0;i < pSysBufs.size();i++) {
+					err = EnqueueBuffer_sysbuf(i);
+					if(err) {
+						err = errno;
+						LOGE("%s(%d): EnqueueBuffer_sysbuf() failed, err=%d", __FUNCTION__, __LINE__, err);
+						break;
+					}
+					nQbufs++;
+				}
+				if(err)
+					break;
+
+				ZzUtils::ZzStatBitRate oStatBitRate;
+				oStatBitRate.log_prefix = "nvbuf";
+				oStatBitRate.Reset();
+
+				LOGD("QVIO_IOC_STREAMON...");
+				err = ioctl(fd_qvio, QVIO_IOC_STREAMON);
+				if(err) {
+					err = errno;
+					LOGE("%s(%d): ioctl(QVIO_IOC_STREAMON) failed, err=%d", __FUNCTION__, __LINE__, err);
+					break;
+				}
+
+				bool bSnapshot = false;
+				int fd_stdin = 0; // stdin
+				while(true) {
 					fd_set readfds;
 					FD_ZERO(&readfds);
 
 					int fd_max = -1;
+					if(fd_stdin > fd_max) fd_max = fd_stdin;
+					FD_SET(fd_stdin, &readfds);
 					if(fd_qvio > fd_max) fd_max = fd_qvio;
 					FD_SET(fd_qvio, &readfds);
 
@@ -370,7 +457,18 @@ namespace __08_frmbufwr__ {
 						break;
 					}
 
+					if (FD_ISSET(fd_stdin, &readfds)) {
+						int ch = getchar();
+
+						if(ch == 'q')
+							break;
+						else if(ch == 's') {
+							bSnapshot = true;
+						}
+					}
+
 					if (FD_ISSET(fd_qvio, &readfds)) {
+						// LOGD("%d: QVIO_IOC_DQBUF", i);
 						int nBufIdx;
 						{
 							qvio_buffer args;
@@ -381,15 +479,35 @@ namespace __08_frmbufwr__ {
 								LOGE("%s(%d): ioctl(QVIO_IOC_DQBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
 								break;
 							}
+							now = _clk();
 							nQbufs--;
 
 							nBufIdx = args.index;
 						}
 
-						LOGD("nBufIdx=%d", nBufIdx);
+						if(bSnapshot) switch(1) { case 1:
+							bSnapshot = false;
+
+							char fn[256];
+							sprintf(fn, "sysbuf_%dx%d.nv16", nStride, nHeight);
+							LOGD("writing to %s...", fn);
+
+							std::ofstream ofs(fn, std::ios::binary);
+							ofs.write((const char*)pSysBufs[nBufIdx], nStride * nHeight * 2);
+						}
+
+						oStatBitRate.Log(nWidth * nHeight * 16, now);
+
+						// LOGD("%d: QVIO_IOC_QBUF, nBufIdx=%d", i, nBufIdx);
+						err = EnqueueBuffer_sysbuf(nBufIdx);
+						if(err) {
+							err = errno;
+							LOGE("%s(%d): EnqueueBuffer_sysbuf() failed, err=%d", __FUNCTION__, __LINE__, err);
+							break;
+						}
+						nQbufs++;
 					}
 				}
-#endif
 
 				LOGD("QVIO_IOC_STREAMOFF...");
 				err = ioctl(fd_qvio, QVIO_IOC_STREAMOFF);
@@ -399,7 +517,6 @@ namespace __08_frmbufwr__ {
 					break;
 				}
 			}
-#endif // BUILD_WITH_NVBUF
 		}
 	};
 }
