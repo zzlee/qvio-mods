@@ -36,6 +36,7 @@ inline uint32_t fourcc(char a, char b, char c, char d) {
 
 static const struct pci_device_id __pci_ids[] = {
 	{ PCI_DEVICE(0x12AB, 0xE380), },
+	{ PCI_DEVICE(0x12AB, 0xE381), },
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, __pci_ids);
@@ -343,6 +344,8 @@ static int start_buf_entry(struct qvio_device* self, struct qvio_buf_entry* buf_
 	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
 	XZ_frmbuf_writer* xFrmBufWr = &self->xFrmBufWr;
 	XV_tpg* xTpg = &self->xTpg;
+	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
+	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
 	struct qvio_buf_regs* buf_regs = buf_entry->buf_regs;
 	struct qvio_buffer* buf = &buf_entry->buf;
 
@@ -352,7 +355,7 @@ static int start_buf_entry(struct qvio_device* self, struct qvio_buf_entry* buf_
 		XAximm_test0_InterruptEnable(xaximm_test0, 0x1); // ap_done
 		XAximm_test0_InterruptGlobalEnable(xaximm_test0);
 		XAximm_test0_Set_pDstPxl(xaximm_test0, self->dma_blocks[0].dma_handle);
-		XAximm_test0_Set_nSize(xaximm_test0, self->desc_block_size);
+		XAximm_test0_Set_nSize(xaximm_test0, self->format.width);
 		XAximm_test0_Set_nTimes(xaximm_test0, self->format.height);
 		XAximm_test0_Start(xaximm_test0);
 		pr_info("XAximm_test0_Start()...\n");
@@ -405,6 +408,28 @@ static int start_buf_entry(struct qvio_device* self, struct qvio_buf_entry* buf_
 		XV_tpg_Set_height(xTpg, self->format.height);
 		XV_tpg_Start(xTpg);
 		pr_info("XV_tpg_Start()...\n");
+		break;
+
+	case QVIO_WORK_MODE_AXIMM_TEST2:
+		XAximm_test0_DisableAutoRestart(xaximm_test2);
+		XAximm_test0_InterruptEnable(xaximm_test2, 0x1); // ap_done
+		XAximm_test0_InterruptGlobalEnable(xaximm_test2);
+		XAximm_test0_Set_pDstPxl(xaximm_test2, self->dma_blocks[0].dma_handle);
+		XAximm_test0_Set_nSize(xaximm_test2, self->format.width);
+		XAximm_test0_Set_nTimes(xaximm_test2, self->format.height);
+		XAximm_test0_Start(xaximm_test2);
+		pr_info("XAximm_test0_Start()...\n");
+		break;
+
+	case QVIO_WORK_MODE_AXIMM_TEST3:
+		XAximm_test0_DisableAutoRestart(xaximm_test3);
+		XAximm_test0_InterruptEnable(xaximm_test3, 0x1); // ap_done
+		XAximm_test0_InterruptGlobalEnable(xaximm_test3);
+		XAximm_test0_Set_pDstPxl(xaximm_test3, self->dma_blocks[0].dma_handle);
+		XAximm_test0_Set_nSize(xaximm_test3, self->format.width);
+		XAximm_test0_Set_nTimes(xaximm_test3, self->format.height);
+		XAximm_test0_Start(xaximm_test3);
+		pr_info("XAximm_test0_Start()...\n");
 		break;
 
 	default:
@@ -1342,15 +1367,19 @@ err0:
 
 static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 	struct qvio_device* self = filp->private_data;
+	struct pci_dev* pdev = self->pci_dev;
 	XAximm_test0* xaximm_test0 = &self->xaximm_test0;
 	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
 	XZ_frmbuf_writer* xFrmBufWr = &self->xFrmBufWr;
 	XV_tpg* xTpg = &self->xTpg;
+	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
+	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
 	long ret;
 	struct qvio_buf_entry* buf_entry;
 	u32 value;
 	u32 nIsIdle;
 	int i;
+	int reset_mask;
 
 	if(self->state == QVIO_STATE_START) {
 		pr_err("unexpected value, self->state=%d\n", self->state);
@@ -1360,11 +1389,26 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 
 	switch(self->work_mode) {
 	case QVIO_WORK_MODE_AXIMM_TEST0:
-		pr_info("reset aximm_test0...\n"); // [aximm_test0, x, x, x, x]
+		switch(pdev->device) {
+		case 0xE380:
+			reset_mask = 0x10; // [aximm_test0, z_frmbuf_writer, aximm_test1, pcie_intr, tpg]
+			break;
+
+		case 0xE381:
+			reset_mask = 0x04; // [aximm_test3, aximm_test2, pcie_intr]
+			break;
+
+		default:
+			reset_mask = 0;
+			pr_err("unexpected value, pdev->device=0x%04X\n", (int)pdev->device);
+			break;
+		}
+
+		pr_info("reset aximm_test0...\n");
 		value = *(u32*)((u8*)self->zzlab_env + 0x24);
-		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x10; // 10000
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask;
 		msleep(100);
-		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x10; // 10000
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | reset_mask;
 
 		for(i = 0;i < 5;i++) {
 			nIsIdle = XAximm_test0_IsIdle(xaximm_test0);
@@ -1423,6 +1467,44 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		}
 		break;
 
+	case QVIO_WORK_MODE_AXIMM_TEST2:
+		pr_info("reset aximm_test2...\n");
+		reset_mask = 0x02; // [aximm_test3, aximm_test2, pcie_intr]
+		value = *(u32*)((u8*)self->zzlab_env + 0x24);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x2; // 10
+		msleep(100);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x2; // 10
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XAximm_test0_IsIdle(xaximm_test2);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
+		}
+		break;
+
+	case QVIO_WORK_MODE_AXIMM_TEST3:
+		pr_info("reset aximm_test3...\n");
+		reset_mask = 0x04; // [aximm_test3, aximm_test2, pcie_intr]
+		value = *(u32*)((u8*)self->zzlab_env + 0x24);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask;
+		msleep(100);
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | reset_mask;
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XAximm_test0_IsIdle(xaximm_test3);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
+		}
+		break;
+
 	default:
 		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
 		ret = -EINVAL;
@@ -1454,6 +1536,8 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
 	XZ_frmbuf_writer* xFrmBufWr = &self->xFrmBufWr;
 	XV_tpg* xTpg = &self->xTpg;
+	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
+	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
 	u32 value;
 	u32 nIsIdle;
 	int i;
@@ -1533,6 +1617,38 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 		if(! nIsIdle) {
 			pr_err("nIsIdle=%u\n", nIsIdle);
 		}
+		break;
+
+	case QVIO_WORK_MODE_AXIMM_TEST2:
+		XAximm_test0_InterruptGlobalDisable(xaximm_test2);
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XAximm_test0_IsIdle(xaximm_test2);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("nIsIdle=%u\n", nIsIdle);
+		}
+
+		XAximm_test0_InterruptClear(xaximm_test2, ISR_ALL_IRQ_MASK);
+		break;
+
+	case QVIO_WORK_MODE_AXIMM_TEST3:
+		XAximm_test0_InterruptGlobalDisable(xaximm_test3);
+
+		for(i = 0;i < 5;i++) {
+			nIsIdle = XAximm_test0_IsIdle(xaximm_test3);
+			if(nIsIdle)
+				break;
+			msleep(100);
+		}
+		if(! nIsIdle) {
+			pr_err("nIsIdle=%u\n", nIsIdle);
+		}
+
+		XAximm_test0_InterruptClear(xaximm_test3, ISR_ALL_IRQ_MASK);
 		break;
 
 	default:
@@ -2014,7 +2130,7 @@ static irqreturn_t __irq_handler_xaximm_test0(int irq, void *dev_id)
 	struct qvio_buf_entry* next_entry;
 
 #if 0
-	pr_info("AXIMM_TEST1, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+	pr_info("AXIMM_TEST0, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
 	self->irq_counter++;
 #endif
 
@@ -2050,6 +2166,112 @@ static irqreturn_t __irq_handler_xaximm_test0(int irq, void *dev_id)
 		// try to do another job
 		if(next_entry) {
 			XAximm_test0_Start(xaximm_test0);
+		} else {
+			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
+		}
+	}
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t __irq_handler_xaximm_test2(int irq, void *dev_id)
+{
+	struct qvio_device* self = dev_id;
+	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
+	u32 status;
+	struct qvio_buf_entry* done_entry;
+	struct qvio_buf_entry* next_entry;
+
+#if 0
+	pr_info("AXIMM_TEST2, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+	self->irq_counter++;
+#endif
+
+	status = XAximm_test0_InterruptGetStatus(xaximm_test2);
+	if(! (status & ISR_ALL_IRQ_MASK)) {
+		pr_warn("unexpected, status=%u\n", status);
+		return IRQ_NONE;
+	}
+
+	XAximm_test0_InterruptClear(xaximm_test2, status & ISR_ALL_IRQ_MASK);
+
+	if(status & ISR_AP_DONE_IRQ) switch(1) { case 1:
+		spin_lock(&self->lock);
+		if(list_empty(&self->job_list)) {
+			spin_unlock(&self->lock);
+			pr_err("self->job_list is empty\n");
+			break;
+		}
+
+		// move job from job_list to done_list
+		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+		list_del(&done_entry->node);
+		// try pick next job
+		next_entry = list_empty(&self->job_list) ? NULL :
+			list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+
+		list_add_tail(&done_entry->node, &self->done_list);
+		spin_unlock(&self->lock);
+
+		// job done wake up
+		wake_up_interruptible(&self->irq_wait);
+
+		// try to do another job
+		if(next_entry) {
+			XAximm_test0_Start(xaximm_test2);
+		} else {
+			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
+		}
+	}
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t __irq_handler_xaximm_test3(int irq, void *dev_id)
+{
+	struct qvio_device* self = dev_id;
+	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
+	u32 status;
+	struct qvio_buf_entry* done_entry;
+	struct qvio_buf_entry* next_entry;
+
+#if 0
+	pr_info("AXIMM_TEST3, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+	self->irq_counter++;
+#endif
+
+	status = XAximm_test0_InterruptGetStatus(xaximm_test3);
+	if(! (status & ISR_ALL_IRQ_MASK)) {
+		pr_warn("unexpected, status=%u\n", status);
+		return IRQ_NONE;
+	}
+
+	XAximm_test0_InterruptClear(xaximm_test3, status & ISR_ALL_IRQ_MASK);
+
+	if(status & ISR_AP_DONE_IRQ) switch(1) { case 1:
+		spin_lock(&self->lock);
+		if(list_empty(&self->job_list)) {
+			spin_unlock(&self->lock);
+			pr_err("self->job_list is empty\n");
+			break;
+		}
+
+		// move job from job_list to done_list
+		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+		list_del(&done_entry->node);
+		// try pick next job
+		next_entry = list_empty(&self->job_list) ? NULL :
+			list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+
+		list_add_tail(&done_entry->node, &self->done_list);
+		spin_unlock(&self->lock);
+
+		// job done wake up
+		wake_up_interruptible(&self->irq_wait);
+
+		// try to do another job
+		if(next_entry) {
+			XAximm_test0_Start(xaximm_test3);
 		} else {
 			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
 		}
@@ -2131,25 +2353,39 @@ static int irq_setup(struct qvio_device* self, struct pci_dev* pdev) {
 				goto err0;
 			}
 
-			switch(i) {
-			case 0:
-				irq_handler = __irq_handler_xaximm_test1;
+			irq_handler = __irq_handler;
+
+			switch(pdev->device) {
+			case 0xE380:
+				switch(i) {
+				case 0:
+					irq_handler = __irq_handler_xaximm_test1;
+					break;
+
+				case 1:
+					irq_handler = __irq_handler_tpg;
+					break;
+
+				case 2:
+					irq_handler = __irq_handler_frmbufwr;
+					break;
+
+				case 3:
+					irq_handler = __irq_handler_xaximm_test0;
+					break;
+				}
 				break;
 
-			case 1:
-				irq_handler = __irq_handler_tpg;
-				break;
+			case 0xE381:
+				switch(i) {
+				case 0:
+					irq_handler = __irq_handler_xaximm_test2;
+					break;
 
-			case 2:
-				irq_handler = __irq_handler_frmbufwr;
-				break;
-
-			case 3:
-				irq_handler = __irq_handler_xaximm_test0;
-				break;
-
-			default:
-				irq_handler = __irq_handler;
+				case 1:
+					irq_handler = __irq_handler_xaximm_test3;
+					break;
+				}
 				break;
 			}
 
@@ -2260,94 +2496,20 @@ static void remove_dev_attrs(struct device* dev) {
 	device_remove_file(dev, &dev_attr_dma_block);
 }
 
-static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
-	int err = 0;
-	struct qvio_device* self;
+static int reset_ip_cores_e380(struct qvio_device* self) {
+	int err;
 	int i;
 	u32 nIsIdle;
 	u32 value;
-
-	pr_info("%04X:%04X (%04X:%04X)\n", (int)pdev->vendor, (int)pdev->device,
-		(int)pdev->subsystem_vendor, (int)pdev->subsystem_device);
-
-	self = qvio_device_new();
-	if(! self) {
-		pr_err("qvio_device_new() failed\n");
-		err = -ENOMEM;
-		goto err0;
-	}
-
-	self->dev = &pdev->dev;
-	self->pci_dev = pdev;
-	dev_set_drvdata(&pdev->dev, self);
-	self->device_id = (((int)pdev->subsystem_vendor & 0xFFFF) << 16) |
-		((int)pdev->subsystem_device & 0xFFFF);
-
-	pr_info("self->device_id=%08X\n", self->device_id);
-
-	err = pci_enable_device(pdev);
-	if (err) {
-		pr_err("pci_enable_device() failed, err=%d\n", err);
-		goto err0;
-	}
-
-	/* keep INTx enabled */
-	pci_check_intr_pend(pdev);
-
-	/* enable relaxed ordering */
-	pci_enable_capability(pdev, PCI_EXP_DEVCTL_RELAX_EN);
-
-	/* enable extended tag */
-	pci_enable_capability(pdev, PCI_EXP_DEVCTL_EXT_TAG);
-
-	/* force MRRS to be 512 */
-	err = pcie_set_readrq(pdev, 512);
-	if (err)
-		pr_info("device %s, error set PCI_EXP_DEVCTL_READRQ: %d.\n",
-			dev_name(&pdev->dev), err);
-
-	/* enable bus master capability */
-	pci_set_master(pdev);
-
-	err = request_regions(self);
-	if(err) {
-		pr_err("request_regions() failed, err=%d\n", err);
-		goto err1;
-	}
-
-	err = map_bars(self);
-	if(err) {
-		pr_err("map_bars() failed, err=%d\n", err);
-		goto err2;
-	}
-
-	err = set_dma_mask(pdev);
-	if(err) {
-		pr_err("set_dma_mask() failed, err=%d\n", err);
-		goto err3;
-	}
-
-	err = enable_msi_msix(self, pdev);
-	if(err) {
-		pr_err("enable_msi_msix() failed, err=%d\n", err);
-		goto err3;
-	}
-
-	err = irq_setup(self, pdev);
-	if(err) {
-		pr_err("irq_setup() failed, err=%d\n", err);
-		goto err4;
-	}
-
-	self->zzlab_env = (void __iomem *)(self->bar[0] + 0x00000);
-	pr_info("zzlab_env = %p\n", self->zzlab_env);
+	int reset_mask;
 
 #if 1
-	pr_info("reset all IPs...\n"); // [aximm_test0, z_frmbuf_writer, aximm_test1, pcie_intr, tpg]
+	pr_info("reset all IPs...\n");
+	reset_mask = 0x1F; // [aximm_test0, z_frmbuf_writer, aximm_test1, pcie_intr, tpg]
 	value = *(u32*)((u8*)self->zzlab_env + 0x24);
-	*(u32*)((u8*)self->zzlab_env + 0x24) = value | ~0x1F; // 11111
+	*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask;
 	msleep(100);
-	*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x1F; // 11111
+	*(u32*)((u8*)self->zzlab_env + 0x24) = value | reset_mask;
 #endif
 
 	self->xaximm_test0.Control_BaseAddress = (u64)self->bar[0] + 0x40000;
@@ -2418,6 +2580,164 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	}
 	if(! nIsIdle) {
 		pr_err("unexpected, XV_tpg_IsIdle()=%u\n", nIsIdle);
+	}
+
+	return 0;
+}
+
+static int reset_ip_cores_e381(struct qvio_device* self) {
+	int err;
+	struct pci_dev *pdev = self->pci_dev;
+	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
+	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
+	int i;
+	u32 nIsIdle;
+	u32 value;
+	int reset_mask;
+
+#if 1
+	pr_info("reset all IPs...\n");
+	reset_mask = 0x07; // [aximm_test3, aximm_test2, pcie_intr]
+	value = *(u32*)((u8*)self->zzlab_env + 0x24);
+	*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask;
+	msleep(100);
+	*(u32*)((u8*)self->zzlab_env + 0x24) = value | reset_mask;
+#endif
+
+	xaximm_test2->Control_BaseAddress = (u64)self->bar[0] + 0x10000;
+	xaximm_test2->IsReady = XIL_COMPONENT_IS_READY;
+	pr_info("xaximm_test2 = %p\n", (void*)xaximm_test2->Control_BaseAddress);
+
+	xaximm_test3->Control_BaseAddress = (u64)self->bar[0] + 0x20000;
+	xaximm_test3->IsReady = XIL_COMPONENT_IS_READY;
+	pr_info("xaximm_test3 = %p\n", (void*)xaximm_test3->Control_BaseAddress);
+
+	for(i = 0;i < 5;i++) {
+		nIsIdle = XAximm_test0_IsIdle(xaximm_test2);
+		if(nIsIdle)
+			break;
+		msleep(100);
+	}
+	if(! nIsIdle) {
+		pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
+	}
+
+	for(i = 0;i < 5;i++) {
+		nIsIdle = XAximm_test0_IsIdle(xaximm_test3);
+		if(nIsIdle)
+			break;
+		msleep(100);
+	}
+	if(! nIsIdle) {
+		pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
+	}
+
+	return 0;
+}
+
+static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
+	int err = 0;
+	struct qvio_device* self;
+
+	pr_info("%04X:%04X (%04X:%04X)\n", (int)pdev->vendor, (int)pdev->device,
+		(int)pdev->subsystem_vendor, (int)pdev->subsystem_device);
+
+	self = qvio_device_new();
+	if(! self) {
+		pr_err("qvio_device_new() failed\n");
+		err = -ENOMEM;
+		goto err0;
+	}
+
+	self->dev = &pdev->dev;
+	self->pci_dev = pdev;
+	dev_set_drvdata(&pdev->dev, self);
+	self->device_id = (((int)pdev->vendor & 0xFFFF) << 16) |
+		((int)pdev->device & 0xFFFF);
+	self->device_subid = (((int)pdev->subsystem_vendor & 0xFFFF) << 16) |
+		((int)pdev->subsystem_device & 0xFFFF);
+
+	pr_info("device_id=%08X device_subid=%08X\n", self->device_id, self->device_subid);
+
+	err = pci_enable_device(pdev);
+	if (err) {
+		pr_err("pci_enable_device() failed, err=%d\n", err);
+		goto err0;
+	}
+
+	/* keep INTx enabled */
+	pci_check_intr_pend(pdev);
+
+	/* enable relaxed ordering */
+	pci_enable_capability(pdev, PCI_EXP_DEVCTL_RELAX_EN);
+
+	/* enable extended tag */
+	pci_enable_capability(pdev, PCI_EXP_DEVCTL_EXT_TAG);
+
+	/* force MRRS to be 512 */
+	err = pcie_set_readrq(pdev, 512);
+	if (err)
+		pr_info("device %s, error set PCI_EXP_DEVCTL_READRQ: %d.\n",
+			dev_name(&pdev->dev), err);
+
+	/* enable bus master capability */
+	pci_set_master(pdev);
+
+	err = request_regions(self);
+	if(err) {
+		pr_err("request_regions() failed, err=%d\n", err);
+		goto err1;
+	}
+
+	err = map_bars(self);
+	if(err) {
+		pr_err("map_bars() failed, err=%d\n", err);
+		goto err2;
+	}
+
+	err = set_dma_mask(pdev);
+	if(err) {
+		pr_err("set_dma_mask() failed, err=%d\n", err);
+		goto err3;
+	}
+
+	err = enable_msi_msix(self, pdev);
+	if(err) {
+		pr_err("enable_msi_msix() failed, err=%d\n", err);
+		goto err3;
+	}
+
+	err = irq_setup(self, pdev);
+	if(err) {
+		pr_err("irq_setup() failed, err=%d\n", err);
+		goto err4;
+	}
+
+	self->zzlab_env = (void __iomem *)(self->bar[0] + 0x00000);
+	pr_info("zzlab_env = %p\n", self->zzlab_env);
+
+	switch(pdev->device) {
+	case 0xE380:
+		err = reset_ip_cores_e380(self);
+		if(err) {
+			pr_err("reset_ip_cores_e380() failed, err=%d\n", err);
+			goto err5;
+		}
+		break;
+
+	case 0xE381:
+		err = reset_ip_cores_e381(self);
+		if(err) {
+			pr_err("reset_ip_cores_e381() failed, err=%d\n", err);
+			goto err5;
+		}
+		break;
+
+	default:
+		err = -EINVAL;
+		pr_err("unexpected value, pdev->device=0x%04X\n", (int)pdev->device);
+		goto err5;
+		break;
 	}
 
 	self->cdev.fops = &__fops;

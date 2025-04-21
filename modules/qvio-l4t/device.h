@@ -28,6 +28,7 @@ struct qvio_device {
 	// PCIs device
 	struct pci_dev *pci_dev;
 	uint32_t device_id;
+	uint32_t device_subid;
 	void __iomem *bar[6];
 	int regions_in_use;
 	int got_regions;
@@ -54,6 +55,8 @@ struct qvio_device {
 	XAximm_test1 xaximm_test1;
 	XZ_frmbuf_writer xFrmBufWr;
 	XV_tpg xTpg;
+	XAximm_test0 xaximm_test2; // same control interface as test0
+	XAximm_test0 xaximm_test3; // same control interface as test0
 
 	int work_mode;
 	struct qvio_format format;
