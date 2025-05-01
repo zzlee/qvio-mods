@@ -57,6 +57,7 @@ struct qvio_device {
 	XV_tpg xTpg;
 	XAximm_test0 xaximm_test2; // same control interface as test0
 	XAximm_test0 xaximm_test3; // same control interface as test0
+	XAximm_test0 xaximm_test2_1; // same control interface as test0
 
 	int work_mode;
 	struct qvio_format format;
