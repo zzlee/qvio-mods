@@ -46,6 +46,10 @@ struct qvio_buf_entry {
 
 	// vars for multi-planar DMA
 	struct qvio_buf_regs buf_regs[QVIO_MAX_PLANES];
+
+	// vars for XDMA regs
+	dma_addr_t dsc_adr;
+	u16 dsc_adj;
 };
 
 struct qvio_buf_entry* qvio_buf_entry_new(void);

@@ -34,9 +34,14 @@ inline uint32_t fourcc(char a, char b, char c, char d) {
 	return (uint32_t)a | ((uint32_t)b << 8) | ((uint32_t)c << 16) | ((uint32_t)d << 24);
 }
 
+inline uint32_t xdma_mkaddr(uint8_t target, uint8_t channel, uint8_t offset) {
+	return ((uint32_t)(target & 0xF) << 12) | ((uint32_t)(channel & 0xF) << 8) | offset;
+}
+
 static const struct pci_device_id __pci_ids[] = {
 	{ PCI_DEVICE(0x12AB, 0xE380), },
 	{ PCI_DEVICE(0x12AB, 0xE381), },
+	{ PCI_DEVICE(0x12AB, 0xE382), },
 	{0,}
 };
 MODULE_DEVICE_TABLE(pci, __pci_ids);
@@ -52,7 +57,7 @@ static void sgt_dump(struct sg_table *sgt, bool full)
 	pr_info("sgt 0x%p, sgl 0x%p, nents %u/%u, dma_addr=%p. (PAGE_SIZE=%lu, PAGE_MASK=%lX)\n", sgt, sgt->sgl, sgt->nents,
 		sgt->orig_nents, (void*)dma_addr, PAGE_SIZE, PAGE_MASK);
 
-	for (i = 0; i < sgt->orig_nents; i++, sg = sg_next(sg)) {
+	for (i = 0; i < sgt->nents; i++, sg = sg_next(sg)) {
 		if(! full && i > 8) {
 			pr_info("... more pages ...\n");
 			break;
@@ -271,6 +276,122 @@ err0:
 	return;
 }
 
+static void do_test_case_3(struct qvio_device* self) {
+	int err;
+	u32* xdma_irq_block;
+	u32* xdma_h2c_channel;
+	u32* xdma_h2c_sgdma;
+	dma_addr_t sgdma_desc;
+	struct xdma_desc* pSgdmaDesc;
+	dma_addr_t src_addr;
+	u8* pSrc;
+	dma_addr_t dst_addr;
+	dma_addr_t nxt_addr;
+	int i;
+
+	xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+	xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
+	xdma_h2c_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x4, 0, 0));
+	sgdma_desc = self->dma_blocks[0].dma_handle;
+	pSgdmaDesc = (struct xdma_desc*)self->dma_blocks[0].cpu_addr;
+	src_addr = self->dma_blocks[1].dma_handle;
+	pSrc = self->dma_blocks[1].cpu_addr;
+	dst_addr = 0xA0000000;
+	nxt_addr = 0;
+
+	for(i = 0;i < 4096;i++) {
+		pSrc[i] = i & 0xFF;
+	}
+
+	dma_sync_single_for_device(self->dev, src_addr, 4096, DMA_TO_DEVICE);
+
+	pSgdmaDesc->control = cpu_to_le32(DESC_MAGIC | XDMA_DESC_STOPPED);
+	pSgdmaDesc->bytes = cpu_to_le32(4096);
+	pSgdmaDesc->src_addr_lo = cpu_to_le32(PCI_DMA_L(src_addr));
+	pSgdmaDesc->src_addr_hi = cpu_to_le32(PCI_DMA_H(src_addr));
+	pSgdmaDesc->dst_addr_lo = cpu_to_le32(PCI_DMA_L(dst_addr));
+	pSgdmaDesc->dst_addr_hi = cpu_to_le32(PCI_DMA_H(dst_addr));
+	pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
+	pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
+
+	pr_info("H2C Channel Identifier: 0x%08X\n", xdma_h2c_channel[0x00 >> 2]);
+	pr_info("H2C SGDMA Identifier: 0x%08X\n", xdma_h2c_sgdma[0x00 >> 2]);
+	pr_info("H2C Channel Status: 0x%X\n", xdma_h2c_channel[0x40 >> 2]);
+	pr_info("H2C Channel Completed Descriptor Count: %d\n", xdma_h2c_channel[0x48 >> 2]);
+
+	xdma_irq_block[0x14 >> 2] = 0x01; // W1S engine_int_req[0:0]
+
+	xdma_h2c_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(sgdma_desc));
+	xdma_h2c_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(sgdma_desc));
+	xdma_h2c_sgdma[0x88 >> 2] = 0;
+
+	xdma_h2c_channel[0x04 >> 2] = BIT(0) | BIT(2); // Run & ie_descriptor_completed
+
+	msleep(1000);
+
+	pr_info("H2C Channel Completed Descriptor Count: %d\n", xdma_h2c_channel[0x48 >> 2]);
+
+	xdma_h2c_channel[0x04 >> 2] = 0;
+}
+
+static void do_test_case_4(struct qvio_device* self) {
+	int err;
+	u32* xdma_irq_block;
+	u32* xdma_c2h_channel;
+	u32* xdma_c2h_sgdma;
+	dma_addr_t sgdma_desc;
+	struct xdma_desc* pSgdmaDesc;
+	dma_addr_t src_addr;
+	dma_addr_t dst_addr;
+	u8* pDst;
+	dma_addr_t nxt_addr;
+	int i;
+
+	xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+	xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
+	xdma_c2h_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x5, 0, 0));
+	sgdma_desc = self->dma_blocks[0].dma_handle;
+	pSgdmaDesc = (struct xdma_desc*)self->dma_blocks[0].cpu_addr;
+	src_addr = 0xA0000000;
+	dst_addr = self->dma_blocks[1].dma_handle;
+	pDst = self->dma_blocks[1].cpu_addr;
+	nxt_addr = 0;
+
+	for(i = 0;i < 4096;i++) {
+		pDst[i] = 0;
+	}
+
+	pSgdmaDesc->control = cpu_to_le32(DESC_MAGIC | XDMA_DESC_STOPPED | XDMA_DESC_COMPLETED);
+	pSgdmaDesc->bytes = cpu_to_le32(4096);
+	pSgdmaDesc->src_addr_lo = cpu_to_le32(PCI_DMA_L(src_addr));
+	pSgdmaDesc->src_addr_hi = cpu_to_le32(PCI_DMA_H(src_addr));
+	pSgdmaDesc->dst_addr_lo = cpu_to_le32(PCI_DMA_L(dst_addr));
+	pSgdmaDesc->dst_addr_hi = cpu_to_le32(PCI_DMA_H(dst_addr));
+	pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
+	pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
+
+	pr_info("C2H Channel Identifier: 0x%08X\n", xdma_c2h_channel[0x00 >> 2]);
+	pr_info("C2H SGDMA Identifier: 0x%08X\n", xdma_c2h_sgdma[0x00 >> 2]);
+	pr_info("C2H Channel Status: 0x%X\n", xdma_c2h_channel[0x40 >> 2]);
+	pr_info("C2H Channel Completed Descriptor Count: %d\n", xdma_c2h_channel[0x48 >> 2]);
+
+	xdma_irq_block[0x14 >> 2] = 0x02; // W1S engine_int_req[1:1]
+
+	xdma_c2h_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(sgdma_desc));
+	xdma_c2h_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(sgdma_desc));
+	xdma_c2h_sgdma[0x88 >> 2] = 0;
+
+	xdma_c2h_channel[0x04 >> 2] = BIT(0) | BIT(2); // Run & ie_descriptor_completed
+
+	msleep(1000);
+
+	pr_info("C2H Channel Completed Descriptor Count: %d\n", xdma_c2h_channel[0x48 >> 2]);
+
+	xdma_c2h_channel[0x04 >> 2] = 0;
+
+	dma_sync_single_for_cpu(self->dev, dst_addr, 4096, DMA_FROM_DEVICE);
+}
+
 static void do_test_case(struct qvio_device* self, int test_case) {
 	switch(test_case) {
 	case 0:
@@ -288,6 +409,18 @@ static void do_test_case(struct qvio_device* self, int test_case) {
 	case 2:
 		pr_info("+test_case %d\n", test_case);
 		do_test_case_2(self);
+		pr_info("-test_case %d\n", test_case);
+		break;
+
+	case 3:
+		pr_info("+test_case %d\n", test_case);
+		do_test_case_3(self);
+		pr_info("-test_case %d\n", test_case);
+		break;
+
+	case 4:
+		pr_info("+test_case %d\n", test_case);
+		do_test_case_4(self);
 		pr_info("-test_case %d\n", test_case);
 		break;
 
@@ -347,6 +480,11 @@ static int start_buf_entry(struct qvio_device* self, struct qvio_buf_entry* buf_
 	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
 	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
 	XAximm_test0* xaximm_test2_1 = &self->xaximm_test2_1;
+	u32* xdma_irq_block;
+	u32* xdma_h2c_channel;
+	u32* xdma_c2h_channel;
+	u32* xdma_h2c_sgdma;
+	u32* xdma_c2h_sgdma;
 	struct qvio_buf_regs* buf_regs = buf_entry->buf_regs;
 	struct qvio_buffer* buf = &buf_entry->buf;
 
@@ -442,6 +580,36 @@ static int start_buf_entry(struct qvio_device* self, struct qvio_buf_entry* buf_
 		XAximm_test0_Set_nTimes(xaximm_test2_1, self->format.height);
 		XAximm_test0_Start(xaximm_test2_1);
 		pr_info("XAximm_test0_Start(xaximm_test2_1)...\n");
+		break;
+
+	case QVIO_WORK_MODE_XDMA_H2C:
+		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+		xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
+		xdma_h2c_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x4, 0, 0));
+
+#if 1
+		xdma_irq_block[0x14 >> 2] = 0x01; // W1S engine_int_req[0:0]
+		xdma_h2c_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr));
+		xdma_h2c_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr));
+		xdma_h2c_sgdma[0x88 >> 2] = buf_entry->dsc_adj;
+		xdma_h2c_channel[0x04 >> 2] = BIT(0) | BIT(1); // Run & ie_descriptor_stopped
+#endif
+		pr_info("XDMA H2C started...\n");
+		break;
+
+	case QVIO_WORK_MODE_XDMA_C2H:
+		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+		xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
+		xdma_c2h_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x5, 0, 0));
+
+#if 1
+		xdma_irq_block[0x14 >> 2] = 0x02; // W1S engine_int_req[1:1]
+		xdma_c2h_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr));
+		xdma_c2h_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr));
+		xdma_c2h_sgdma[0x88 >> 2] = buf_entry->dsc_adj;
+		xdma_c2h_channel[0x04 >> 2] = BIT(0) | BIT(1); // Run & ie_descriptor_stopped
+#endif
+		pr_info("XDMA C2H started...\n");
 		break;
 
 	default:
@@ -942,6 +1110,12 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 	struct qvio_buf_regs* buf_regs;
 	int nDescItemCount;
 	int i;
+	struct dma_block_t* pDmaBlock;
+	struct xdma_desc* pSgdmaDesc;
+	dma_addr_t src_addr;
+	dma_addr_t dst_addr;
+	dma_addr_t nxt_addr;
+	int Nxt_adj;
 
 	buf_entry = qvio_buf_entry_new();
 	if(! buf_entry) {
@@ -949,57 +1123,163 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 		goto err0;
 	}
 
-	sg = sgt->sgl;
-	nents = sgt->nents;
-	sg_index = 0;
-	sg_offset = 0;
 	buf_entry->dev = self->dev;
 	buf_entry->desc_pool = self->desc_pool;
-	pDescBlock = buf_entry->desc_blocks;
-	pDescBlockEnd = buf_entry->desc_blocks + ARRAY_SIZE(buf_entry->desc_blocks);
-	buf_regs = buf_entry->buf_regs;
 
-	pSgDescItems = vmalloc(sizeof(struct desc_item_t) * nents);
-	if(! pSgDescItems) {
-		pr_err("vmalloc() failed\n");
-		ret = ENOMEM;
+	pSgDescItems = NULL;
+	sg = sgt->sgl;
+	nents = sgt->nents;
+
+	switch(self->work_mode) {
+	case QVIO_WORK_MODE_AXIMM_TEST0:
+	case QVIO_WORK_MODE_AXIMM_TEST1:
+	case QVIO_WORK_MODE_FRMBUFWR:
+	case QVIO_WORK_MODE_AXIMM_TEST2:
+	case QVIO_WORK_MODE_AXIMM_TEST3:
+	case QVIO_WORK_MODE_AXIMM_TEST2_1:
+		sg_index = 0;
+		sg_offset = 0;
+		pDescBlock = buf_entry->desc_blocks;
+		pDescBlockEnd = buf_entry->desc_blocks + ARRAY_SIZE(buf_entry->desc_blocks);
+		buf_regs = buf_entry->buf_regs;
+
+		pSgDescItems = vmalloc(sizeof(struct desc_item_t) * nents);
+		if(! pSgDescItems) {
+			pr_err("vmalloc() failed\n");
+			ret = ENOMEM;
+			goto err1;
+		}
+
+		for(i = 0;i < self->planes;i++) {
+			// pr_info("plane %d\n", i);
+
+			skip_offset_sgt(
+				buf->offset[i],
+				&sg, nents, &sg_index, &sg_offset);
+			nDescItemCount = get_desc_items_sgt(
+				buf->stride[i] * self->format.height,
+				&sg, nents, &sg_index, &sg_offset,
+				pSgDescItems, &buf_regs[i]);
+
+			// pr_info("nDescItemCount=%d, sg_index=%d, sg_offset=%d\n", nDescItemCount, sg_index, sg_offset);
+
+			ret = fill_desc_items_block(
+				pSgDescItems, nDescItemCount,
+				&pDescBlock, pDescBlockEnd, self->desc_block_size,
+				buf_entry, &buf_regs[i]);
+			if(ret) {
+				pr_err("fill_desc_items_block() failed, ret=%d\n", ret);
+				goto err2;
+			}
+
+			sg = sgt->sgl;
+			sg_index = 0;
+			sg_offset = 0;
+		}
+
+		vfree(pSgDescItems);
+		break;
+
+	case QVIO_WORK_MODE_XDMA_H2C:
+		pDmaBlock = &buf_entry->desc_blocks[0];
+		ret = qvio_dma_block_alloc(pDmaBlock, buf_entry->desc_pool, GFP_KERNEL | GFP_DMA);
+		if(ret) {
+			pr_err("qvio_dma_block_alloc() failed, ret=%d\n", ret);
+			goto err1;
+		}
+
+		buf_entry->dsc_adr = pDmaBlock->dma_handle;
+		buf_entry->dsc_adj = nents - 1;
+
+		pSgdmaDesc = pDmaBlock->cpu_addr;
+		Nxt_adj = nents - 1;
+		dst_addr = 0xA0000000;
+
+		for (i = 0; i < nents; i++, sg = sg_next(sg), pSgdmaDesc++, dst_addr += sg_dma_len(sg), Nxt_adj--) {
+			src_addr = sg_dma_address(sg);
+			nxt_addr = pDmaBlock->dma_handle + ((u8*)(pSgdmaDesc + 1) - (u8*)pDmaBlock->cpu_addr);
+
+#if 0
+			pr_warn("%d, src_addr 0x%llx, dst_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d\n",
+				i, src_addr, dst_addr, nxt_addr, Nxt_adj);
+#endif
+
+#if 1
+			pSgdmaDesc->control = cpu_to_le32(DESC_MAGIC | (Nxt_adj << 8));
+			pSgdmaDesc->bytes = sg_dma_len(sg);
+			pSgdmaDesc->src_addr_lo = cpu_to_le32(PCI_DMA_L(src_addr));
+			pSgdmaDesc->src_addr_hi = cpu_to_le32(PCI_DMA_H(src_addr));
+			pSgdmaDesc->dst_addr_lo = cpu_to_le32(PCI_DMA_L(dst_addr));
+			pSgdmaDesc->dst_addr_hi = cpu_to_le32(PCI_DMA_H(dst_addr));
+			pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
+			pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
+#endif
+		}
+
+#if 1
+		pSgdmaDesc--;
+		pSgdmaDesc->control |= cpu_to_le32(XDMA_DESC_STOPPED);
+		pSgdmaDesc->next_lo = 0;
+		pSgdmaDesc->next_hi = 0;
+#endif
+		break;
+
+	case QVIO_WORK_MODE_XDMA_C2H:
+		pDmaBlock = &buf_entry->desc_blocks[0];
+		ret = qvio_dma_block_alloc(pDmaBlock, buf_entry->desc_pool, GFP_KERNEL | GFP_DMA);
+		if(ret) {
+			pr_err("qvio_dma_block_alloc() failed, ret=%d\n", ret);
+			goto err1;
+		}
+
+		buf_entry->dsc_adr = pDmaBlock->dma_handle;
+		buf_entry->dsc_adj = nents - 1;
+
+		pSgdmaDesc = pDmaBlock->cpu_addr;
+		Nxt_adj = nents - 1;
+		src_addr = 0xA0000000;
+
+		for (i = 0; i < nents; i++, sg = sg_next(sg), pSgdmaDesc++, dst_addr += sg_dma_len(sg), Nxt_adj--) {
+			dst_addr = sg_dma_address(sg);
+			nxt_addr = pDmaBlock->dma_handle + ((u8*)(pSgdmaDesc + 1) - (u8*)pDmaBlock->cpu_addr);
+
+#if 0
+			pr_warn("%d, src_addr 0x%llx, dst_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d\n",
+				i, src_addr, dst_addr, nxt_addr, Nxt_adj);
+#endif
+
+#if 1
+			pSgdmaDesc->control = cpu_to_le32(DESC_MAGIC | (Nxt_adj << 8));
+			pSgdmaDesc->bytes = sg_dma_len(sg);
+			pSgdmaDesc->src_addr_lo = cpu_to_le32(PCI_DMA_L(src_addr));
+			pSgdmaDesc->src_addr_hi = cpu_to_le32(PCI_DMA_H(src_addr));
+			pSgdmaDesc->dst_addr_lo = cpu_to_le32(PCI_DMA_L(dst_addr));
+			pSgdmaDesc->dst_addr_hi = cpu_to_le32(PCI_DMA_H(dst_addr));
+			pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
+			pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
+#endif
+		}
+
+#if 1
+		pSgdmaDesc--;
+		pSgdmaDesc->control |= cpu_to_le32(XDMA_DESC_STOPPED);
+		pSgdmaDesc->next_lo = 0;
+		pSgdmaDesc->next_hi = 0;
+#endif
+		break;
+
+	default:
+		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
+		ret = EINVAL;
 		goto err1;
 	}
 
-	for(i = 0;i < self->planes;i++) {
-		// pr_info("plane %d\n", i);
-
-		skip_offset_sgt(
-			buf->offset[i],
-			&sg, nents, &sg_index, &sg_offset);
-		nDescItemCount = get_desc_items_sgt(
-			buf->stride[i] * self->format.height,
-			&sg, nents, &sg_index, &sg_offset,
-			pSgDescItems, &buf_regs[i]);
-
-		// pr_info("nDescItemCount=%d, sg_index=%d, sg_offset=%d\n", nDescItemCount, sg_index, sg_offset);
-
-		ret = fill_desc_items_block(
-			pSgDescItems, nDescItemCount,
-			&pDescBlock, pDescBlockEnd, self->desc_block_size,
-			buf_entry, &buf_regs[i]);
-		if(ret) {
-			pr_err("fill_desc_items_block() failed, ret=%d\n", ret);
-			goto err2;
-		}
-
-		sg = sgt->sgl;
-		sg_index = 0;
-		sg_offset = 0;
-	}
-
-	vfree(pSgDescItems);
 	*ppBufEntry = buf_entry;
 
 	return 0;
 
 err2:
-	vfree(pSgDescItems);
+	if(pSgDescItems) vfree(pSgDescItems);
 err1:
 	qvio_buf_entry_put(buf_entry);
 err0:
@@ -1079,8 +1359,6 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 		pr_err("dma_map_sgtable() failed, err=%ld\n", ret);
 		goto err4;
 	}
-
-	// sgt_dump(sgt, true);
 
 	ret = buf_entry_from_sgt(self, sgt, buf, &buf_entry);
 	if (ret) {
@@ -1387,6 +1665,9 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
 	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
 	XAximm_test0* xaximm_test2_1 = &self->xaximm_test2_1;
+	u32* xdma_irq_block;
+	u32* xdma_h2c_channel;
+	u32* xdma_c2h_channel;
 	long ret;
 	struct qvio_buf_entry* buf_entry;
 	u32 value;
@@ -1537,6 +1818,36 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		}
 		break;
 
+	case QVIO_WORK_MODE_XDMA_H2C:
+		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+		xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
+
+		pr_info("IRQ Block Identifier: 0x%08X\n", xdma_irq_block[0x00 >> 2]);
+		pr_info("H2C Channel Identifier: 0x%08X\n", xdma_h2c_channel[0x00 >> 2]);
+		pr_info("H2C Channel Status: 0x%X\n", xdma_h2c_channel[0x40 >> 2]);
+		pr_info("H2C Channel Completed Descriptor Count: %d\n", xdma_h2c_channel[0x48 >> 2]);
+
+#if 1
+		xdma_irq_block[0x14 >> 2] = 0x01; // W1S engine_int_req[0:0]
+		xdma_h2c_channel[0x04 >> 2] = 0;
+#endif
+		break;
+
+	case QVIO_WORK_MODE_XDMA_C2H:
+		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+		xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
+
+		pr_info("IRQ Block Identifier: 0x%08X\n", xdma_irq_block[0x00 >> 2]);
+		pr_info("C2H Channel Identifier: 0x%08X\n", xdma_c2h_channel[0x00 >> 2]);
+		pr_info("C2H Channel Status: 0x%X\n", xdma_c2h_channel[0x40 >> 2]);
+		pr_info("C2H Channel Completed Descriptor Count: %d\n", xdma_c2h_channel[0x48 >> 2]);
+
+#if 1
+		xdma_irq_block[0x14 >> 2] = 0x02; // W1S engine_int_req[1:1]
+		xdma_c2h_channel[0x04 >> 2] = 0;
+#endif
+		break;
+
 	default:
 		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
 		ret = -EINVAL;
@@ -1571,6 +1882,9 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
 	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
 	XAximm_test0* xaximm_test2_1 = &self->xaximm_test2_1;
+	u32* xdma_irq_block;
+	u32* xdma_h2c_channel;
+	u32* xdma_c2h_channel;
 	u32 value;
 	u32 nIsIdle;
 	int i;
@@ -1698,6 +2012,36 @@ static long __file_ioctl_streamoff(struct file * filp, unsigned long arg) {
 		}
 
 		XAximm_test0_InterruptClear(xaximm_test2_1, ISR_ALL_IRQ_MASK);
+		break;
+
+	case QVIO_WORK_MODE_XDMA_H2C:
+		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+		xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
+
+		pr_info("IRQ Block Identifier: 0x%08X\n", xdma_irq_block[0x00 >> 2]);
+		pr_info("H2C Channel Identifier: 0x%08X\n", xdma_h2c_channel[0x00 >> 2]);
+		pr_info("H2C Channel Status: 0x%X\n", xdma_h2c_channel[0x40 >> 2]);
+		pr_info("H2C Channel Completed Descriptor Count: %d\n", xdma_h2c_channel[0x48 >> 2]);
+
+#if 1
+		xdma_irq_block[0x18 >> 2] = 0x01; // W1C engine_int_req[0:0]
+		xdma_h2c_channel[0x04 >> 2] = 0;
+#endif
+		break;
+
+	case QVIO_WORK_MODE_XDMA_C2H:
+		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+		xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
+
+		pr_info("IRQ Block Identifier: 0x%08X\n", xdma_irq_block[0x00 >> 2]);
+		pr_info("C2H Channel Identifier: 0x%08X\n", xdma_c2h_channel[0x00 >> 2]);
+		pr_info("C2H Channel Status: 0x%X\n", xdma_c2h_channel[0x40 >> 2]);
+		pr_info("C2H Channel Completed Descriptor Count: %d\n", xdma_c2h_channel[0x48 >> 2]);
+
+#if 1
+		xdma_irq_block[0x18 >> 2] = 0x02; // W1C engine_int_req[1:1]
+		xdma_c2h_channel[0x04 >> 2] = 0;
+#endif
 		break;
 
 	default:
@@ -2382,6 +2726,143 @@ static irqreturn_t __irq_handler_xaximm_test2_1(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t __irq_handler_xdma(int irq, void *dev_id)
+{
+	struct qvio_device* self = dev_id;
+	u32* zzlab_env;
+	u32* xdma_irq_block;
+	u32* xdma_h2c_channel;
+	u32* xdma_c2h_channel;
+	u32* xdma_h2c_sgdma;
+	u32* xdma_c2h_sgdma;
+	u32 usr_irq_req, usr_int_pend;
+	u32 intr;
+	int i, intr_mask;
+	u32 engine_int_req, engine_int_pend;
+	u32 Status;
+	struct qvio_buf_entry* done_entry;
+	struct qvio_buf_entry* next_entry;
+
+#if 0
+	pr_info("XDMA, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+	self->irq_counter++;
+#endif
+
+	zzlab_env = (u32*)self->zzlab_env;
+	xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+
+	usr_irq_req = xdma_irq_block[0x40 >> 2];
+	usr_int_pend = xdma_irq_block[0x48 >> 2];
+	intr = zzlab_env[0x28 >> 2];
+	engine_int_req = xdma_irq_block[0x44 >> 2];
+	engine_int_pend = xdma_irq_block[0x4C >> 2];
+
+	// pr_info("usr_irq_req=0x%X usr_int_pend=0x%X, intr=0x%X\n", usr_irq_req, usr_int_pend, intr);
+	for(i = 0;i < 4;i++) {
+		intr_mask = 1 << i;
+
+		if(usr_irq_req & intr_mask) {
+			pr_info("User Interrupt %d\n", i);
+
+			intr &= ~intr_mask;
+
+			zzlab_env[0x28 >> 2] = intr;
+		}
+	}
+
+	// pr_info("engine_int_req=0x%X engine_int_pend=0x%X\n", engine_int_req, engine_int_pend);
+	if(engine_int_req & 0x01) switch(1) { case 1: // H2C
+		xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
+		xdma_h2c_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x4, 0, 0));
+
+		xdma_irq_block[0x18 >> 2] = 0x01; // W1C engine_int_req[0:0]
+		Status = xdma_h2c_channel[0x44 >> 2];
+
+#if 0
+		pr_info("Engine Interrupt H2C, Status=%d\n", Status);
+		pr_info("H2C Channel Completed Descriptor Count: %d\n", xdma_h2c_channel[0x48 >> 2]);
+#endif
+
+		xdma_h2c_channel[0x04 >> 2] = 0; // Stop
+
+		spin_lock(&self->lock);
+		if(list_empty(&self->job_list)) {
+			spin_unlock(&self->lock);
+			pr_err("self->job_list is empty\n");
+			break;
+		}
+
+		// move job from job_list to done_list
+		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+		list_del(&done_entry->node);
+		// try pick next job
+		next_entry = list_empty(&self->job_list) ? NULL :
+			list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+
+		list_add_tail(&done_entry->node, &self->done_list);
+		spin_unlock(&self->lock);
+
+		// job done wake up
+		wake_up_interruptible(&self->irq_wait);
+
+		// try to do another job
+		if(next_entry) {
+			xdma_irq_block[0x14 >> 2] = 0x01; // W1S engine_int_req[0:0]
+			xdma_h2c_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(next_entry->dsc_adr));
+			xdma_h2c_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(next_entry->dsc_adr));
+			xdma_h2c_sgdma[0x88 >> 2] = next_entry->dsc_adj;
+			xdma_h2c_channel[0x04 >> 2] = BIT(0) | BIT(1); // Run & ie_descriptor_stopped
+		} else {
+			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
+		}
+	}
+
+	if(engine_int_req & 0x02) switch(1) { case 1: // C2H
+		xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
+		xdma_c2h_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x5, 0, 0));
+
+		xdma_irq_block[0x18 >> 2] = 0x02; // W1C engine_int_req[1:1]
+		Status = xdma_c2h_channel[0x44 >> 2];
+		pr_info("Engine Interrupt C2H, Status=%d\n", Status);
+
+		xdma_c2h_channel[0x04 >> 2] = 0; // Stop
+
+		spin_lock(&self->lock);
+		if(list_empty(&self->job_list)) {
+			spin_unlock(&self->lock);
+			pr_err("self->job_list is empty\n");
+			break;
+		}
+
+		// move job from job_list to done_list
+		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+		list_del(&done_entry->node);
+		// try pick next job
+		next_entry = list_empty(&self->job_list) ? NULL :
+			list_first_entry(&self->job_list, struct qvio_buf_entry, node);
+
+		list_add_tail(&done_entry->node, &self->done_list);
+		spin_unlock(&self->lock);
+
+		// job done wake up
+		wake_up_interruptible(&self->irq_wait);
+
+		// try to do another job
+		if(next_entry) {
+			xdma_irq_block[0x14 >> 2] = 0x02; // W1S engine_int_req[1:1]
+			xdma_c2h_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(next_entry->dsc_adr));
+			xdma_c2h_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(next_entry->dsc_adr));
+			xdma_c2h_sgdma[0x88 >> 2] = next_entry->dsc_adj;
+			xdma_c2h_channel[0x04 >> 2] = BIT(0) | BIT(1); // Run & ie_descriptor_stopped
+		} else {
+			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
+		}
+	}
+
+	return IRQ_HANDLED;
+}
+
+
 static int enable_msi_msix(struct qvio_device* self, struct pci_dev* pdev) {
 	int err;
 	int msi_vec_count;
@@ -2445,15 +2926,20 @@ static int irq_setup(struct qvio_device* self, struct pci_dev* pdev) {
 	int i;
 	u32 vector;
 	irqreturn_t (*irq_handler)(int, void *);
+	int irq_count;
 
 	if(self->msi_enabled) {
-		for(i = 0;i < ARRAY_SIZE(self->irq_lines);i++) {
+		irq_count = min((int)pci_msi_vec_count(pdev), (int)ARRAY_SIZE(self->irq_lines));
+
+		for(i = 0;i < irq_count;i++) {
 			vector = pci_irq_vector(pdev, i);
 			if(vector == -EINVAL) {
 				err = -EINVAL;
 				pr_err("pci_irq_vector() failed\n");
 				goto err0;
 			}
+
+			pr_info("irq[%d] vector=%d\n", i, vector);
 
 			irq_handler = __irq_handler;
 
@@ -2490,6 +2976,26 @@ static int irq_setup(struct qvio_device* self, struct pci_dev* pdev) {
 
 				case 2:
 					irq_handler = __irq_handler_xaximm_test2_1;
+					break;
+				}
+				break;
+
+			case 0xE382:
+				switch(i) {
+				case 0:
+					irq_handler = __irq_handler_xdma;
+					break;
+
+				case 1:
+					irq_handler = __irq_handler_xdma;
+					break;
+
+				case 2:
+					irq_handler = __irq_handler_xdma;
+					break;
+
+				case 3:
+					irq_handler = __irq_handler_xdma;
 					break;
 				}
 				break;
@@ -2602,7 +3108,7 @@ static void remove_dev_attrs(struct device* dev) {
 	device_remove_file(dev, &dev_attr_dma_block);
 }
 
-static int reset_ip_cores_e380(struct qvio_device* self) {
+static int setup_e380(struct qvio_device* self) {
 	int err;
 	int i;
 	u32 nIsIdle;
@@ -2691,7 +3197,7 @@ static int reset_ip_cores_e380(struct qvio_device* self) {
 	return 0;
 }
 
-static int reset_ip_cores_e381(struct qvio_device* self) {
+static int setup_e381(struct qvio_device* self) {
 	int err;
 	struct pci_dev *pdev = self->pci_dev;
 	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
@@ -2752,6 +3258,46 @@ static int reset_ip_cores_e381(struct qvio_device* self) {
 	if(! nIsIdle) {
 		pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
 	}
+
+	return 0;
+}
+
+static int setup_e382(struct qvio_device* self) {
+	int err;
+	struct pci_dev *pdev = self->pci_dev;
+	u32* xdma_irq_block;
+	u32 xdma_reg;
+	u32* xdma_h2c_channel;
+	u32* xdma_c2h_channel;
+
+	xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+	xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
+	xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
+
+	// IRQ Block User Interrupt Enable Mask
+	xdma_irq_block[0x04 >> 2] = 0x0F; // Enable usr_irq_req[3:0]
+
+	// IRQ Block User Vector Number
+	xdma_reg = xdma_irq_block[0x80 >> 2];
+	xdma_reg = (xdma_reg & ~(0x1F << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
+	xdma_reg = (xdma_reg & ~(0x1F << 8)) | (1 << 8); // Map usr_irq_req[1] to MSI-X Vector 1
+	xdma_reg = (xdma_reg & ~(0x1F << 16)) | (2 << 16); // Map usr_irq_req[2] to MSI-X Vector 2
+	xdma_reg = (xdma_reg & ~(0x1F << 24)) | (3 << 24); // Map usr_irq_req[3] to MSI-X Vector 3
+	xdma_irq_block[0x80 >> 2] = xdma_reg;
+
+	// IRQ Block Channel Interrupt Enable Mask
+	xdma_irq_block[0x10 >> 2] = 0x03; // Enable engine_int_req[1:0]
+	xdma_irq_block[0x18 >> 2] = 0x03; // W1C engine_int_req[1:0]
+
+	// IRQ Block Channel Vector Number
+	xdma_reg = xdma_irq_block[0xA0 >> 2];
+	xdma_reg = (xdma_reg & ~(0x1F << 0)) | (0 << 0); // Map engine_int_req[0] to MSI-X Vector 0
+	xdma_reg = (xdma_reg & ~(0x1F << 8)) | (1 << 8); // Map engine_int_req[1] to MSI-X Vector 1
+	xdma_irq_block[0xA0 >> 2] = xdma_reg;
+
+	xdma_h2c_channel[0x90 >> 2] = BIT(1); // im_descriptor_stopped
+	xdma_c2h_channel[0x90 >> 2] = BIT(1); // im_descriptor_stopped
+
 	return 0;
 }
 
@@ -2838,17 +3384,25 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 
 	switch(pdev->device) {
 	case 0xE380:
-		err = reset_ip_cores_e380(self);
+		err = setup_e380(self);
 		if(err) {
-			pr_err("reset_ip_cores_e380() failed, err=%d\n", err);
+			pr_err("setup_e380() failed, err=%d\n", err);
 			goto err5;
 		}
 		break;
 
 	case 0xE381:
-		err = reset_ip_cores_e381(self);
+		err = setup_e381(self);
 		if(err) {
-			pr_err("reset_ip_cores_e381() failed, err=%d\n", err);
+			pr_err("setup_e381() failed, err=%d\n", err);
+			goto err5;
+		}
+		break;
+
+	case 0xE382:
+		err = setup_e382(self);
+		if(err) {
+			pr_err("setup_e382() failed, err=%d\n", err);
 			goto err5;
 		}
 		break;

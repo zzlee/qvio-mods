@@ -18,6 +18,8 @@ err0:
 
 int qvio_dma_block_free(struct dma_block_t* self, struct dma_pool* pool) {
 	dma_pool_free(pool, self->cpu_addr, self->dma_handle);
+	self->dma_handle = 0;
+	self->cpu_addr = 0;
 
 	return 0;
 }

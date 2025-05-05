@@ -139,6 +139,14 @@ namespace __09_aximm_test2__ {
 						case '4':
 							OnTest1(now, QVIO_WORK_MODE_AXIMM_TEST2_1);
 							break;
+
+						case '5':
+							OnTest1(now, QVIO_WORK_MODE_XDMA_H2C);
+							break;
+
+						case '6':
+							OnTest1(now, QVIO_WORK_MODE_XDMA_C2H);
+							break;
 						}
 					}
 
