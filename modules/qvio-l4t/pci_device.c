@@ -1688,10 +1688,6 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 			reset_mask = 0x10; // [aximm_test0, z_frmbuf_writer, aximm_test1, pcie_intr, tpg]
 			break;
 
-		case 0xE381:
-			reset_mask = 0x04; // [aximm_test3, aximm_test2, pcie_intr]
-			break;
-
 		default:
 			reset_mask = 0;
 			pr_err("unexpected value, pdev->device=0x%04X\n", (int)pdev->device);
@@ -1716,11 +1712,22 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		break;
 
 	case QVIO_WORK_MODE_AXIMM_TEST1:
-		pr_info("reset aximm_test1...\n"); // [x, x, aximm_test1, x, x]
+		switch(pdev->device) {
+		case 0xE380:
+			reset_mask = 0x04; // [x, x, aximm_test1, x, x]
+			break;
+
+		default:
+			reset_mask = 0;
+			pr_err("unexpected value, pdev->device=0x%04X\n", (int)pdev->device);
+			break;
+		}
+
+		pr_info("reset aximm_test1...\n");
 		value = *(u32*)((u8*)self->zzlab_env + 0x24);
-		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x04; // 00100
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask;
 		msleep(100);
-		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x04; // 00100
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | reset_mask;
 
 		for(i = 0;i < 5;i++) {
 			nIsIdle = XAximm_test1_IsIdle(xaximm_test1);
@@ -1762,12 +1769,22 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		break;
 
 	case QVIO_WORK_MODE_AXIMM_TEST2:
+		switch(pdev->device) {
+		case 0xE381:
+			reset_mask = 0x01; // [aximm_test2_1, aximm_test3, aximm_test2]
+			break;
+
+		default:
+			reset_mask = 0;
+			pr_err("unexpected value, pdev->device=0x%04X\n", (int)pdev->device);
+			break;
+		}
+
 		pr_info("reset aximm_test2...\n");
-		reset_mask = 0x02; // [aximm_test3, aximm_test2, pcie_intr]
 		value = *(u32*)((u8*)self->zzlab_env + 0x24);
-		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x2; // 10
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask;
 		msleep(100);
-		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x2; // 10
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | reset_mask;
 
 		for(i = 0;i < 5;i++) {
 			nIsIdle = XAximm_test0_IsIdle(xaximm_test2);
@@ -1781,8 +1798,18 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		break;
 
 	case QVIO_WORK_MODE_AXIMM_TEST3:
+		switch(pdev->device) {
+		case 0xE381:
+			reset_mask = 0x02; // [aximm_test2_1, aximm_test3, aximm_test2]
+			break;
+
+		default:
+			reset_mask = 0;
+			pr_err("unexpected value, pdev->device=0x%04X\n", (int)pdev->device);
+			break;
+		}
+
 		pr_info("reset aximm_test3...\n");
-		reset_mask = 0x04; // [aximm_test3, aximm_test2, pcie_intr]
 		value = *(u32*)((u8*)self->zzlab_env + 0x24);
 		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask;
 		msleep(100);
@@ -1800,12 +1827,22 @@ static long __file_ioctl_streamon(struct file * filp, unsigned long arg) {
 		break;
 
 	case QVIO_WORK_MODE_AXIMM_TEST2_1:
+		switch(pdev->device) {
+		case 0xE381:
+			reset_mask = 0x04; // [aximm_test2_1, aximm_test3, aximm_test2]
+			break;
+
+		default:
+			reset_mask = 0;
+			pr_err("unexpected value, pdev->device=0x%04X\n", (int)pdev->device);
+			break;
+		}
+
 		pr_info("reset aximm_test2_1...\n");
-		reset_mask = 0x02; // [aximm_test3, aximm_test2, pcie_intr]
 		value = *(u32*)((u8*)self->zzlab_env + 0x24);
-		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~0x2; // 10
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask; // 10
 		msleep(100);
-		*(u32*)((u8*)self->zzlab_env + 0x24) = value | 0x2; // 10
+		*(u32*)((u8*)self->zzlab_env + 0x24) = value | reset_mask; // 10
 
 		for(i = 0;i < 5;i++) {
 			nIsIdle = XAximm_test0_IsIdle(xaximm_test2_1);
@@ -3210,7 +3247,7 @@ static int setup_e381(struct qvio_device* self) {
 
 #if 1
 	pr_info("reset all IPs...\n");
-	reset_mask = 0x07; // [aximm_test3, aximm_test2, pcie_intr]
+	reset_mask = 0x07; // [aximm_test2_1, aximm_test3, aximm_test2]
 	value = *(u32*)((u8*)self->zzlab_env + 0x24);
 	*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask;
 	msleep(100);
