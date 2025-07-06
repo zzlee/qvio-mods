@@ -44,6 +44,7 @@ struct qvio_device {
 
 	// vars for dev-attr
 	int dma_block_index;
+	int dma_sync;
 	int test_case;
 
 	// Char device
@@ -58,6 +59,9 @@ struct qvio_device {
 	XAximm_test0 xaximm_test2; // same control interface as test0
 	XAximm_test0 xaximm_test3; // same control interface as test0
 	XAximm_test0 xaximm_test2_1; // same control interface as test0
+	void __iomem * qdma_intr;
+	void __iomem * qdma_wr;
+	void __iomem * qdma_rd;
 
 	int work_mode;
 	struct qvio_format format;

@@ -149,6 +149,13 @@ enum qvio_buf_type {
 	QVIO_BUF_TYPE_MMAP,
 };
 
+enum qvio_buf_dir {
+	QVIO_BUF_DIR_BIDIRECTIONAL = 0,
+	QVIO_BUF_DIR_TO_DEVICE = 1,
+	QVIO_BUF_DIR_FROM_DEVICE = 2,
+	QVIO_BUF_DIR_NONE = 3,
+};
+
 enum qvio_work_mode {
 	QVIO_WORK_MODE_AXIMM_TEST0 = 1,
 	QVIO_WORK_MODE_AXIMM_TEST1,
@@ -158,12 +165,15 @@ enum qvio_work_mode {
 	QVIO_WORK_MODE_AXIMM_TEST2_1,
 	QVIO_WORK_MODE_XDMA_H2C,
 	QVIO_WORK_MODE_XDMA_C2H,
+	QVIO_WORK_MODE_QDMA_WR,
+	QVIO_WORK_MODE_QDMA_RD,
 };
 
 struct qvio_buffer {
 	__u32 index;
 
 	__u16 buf_type; // ref to qvio_buf_type
+	__u16 buf_dir; // ref to qvio_buf_dir
 	union {
 		unsigned long userptr;
 		__s32 fd;
