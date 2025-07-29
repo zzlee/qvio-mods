@@ -313,7 +313,21 @@ namespace __09_aximm_test2__ {
 					break;
 
 				ZzUtils::ZzStatBitRate oStatBitRate;
-				oStatBitRate.log_prefix = "userptr";
+
+				switch(nBufferType) {
+				case QVIO_BUF_TYPE_USERPTR:
+					oStatBitRate.log_prefix = "userptr";
+					break;
+
+				case QVIO_BUF_TYPE_DMABUF:
+					oStatBitRate.log_prefix = "dmabuf";
+					break;
+
+				default:
+					oStatBitRate.log_prefix = "unknown";
+					break;
+				}
+
 				oStatBitRate.Reset();
 
 				LOGD("QVIO_IOC_STREAMON...");
