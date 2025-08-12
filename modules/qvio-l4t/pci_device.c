@@ -752,10 +752,10 @@ static int start_buf_entry(struct qvio_device* self, struct qvio_buf_entry* buf_
 
 		qdma_rd = (uintptr_t)self->qdma_rd;
 		pr_info("qdma_rd[0x00]=0x%x\n", io_read_reg(qdma_rd, 0x00));
-		io_write_reg(qdma_rd, 0x18, self->format.width);
-		io_write_reg(qdma_rd, 0x1C, self->format.height);
-		io_write_reg(qdma_rd, 0x10, (u32)(pSgdmaDesc->src_addr_lo));
-		io_write_reg(qdma_rd, 0x14, (u32)(pSgdmaDesc->src_addr_hi));
+		io_write_reg(qdma_rd, 0x10, cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr)));
+		io_write_reg(qdma_rd, 0x14, cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr)));
+		io_write_reg(qdma_rd, 0x18, buf_entry->dsc_adj);
+		io_write_reg(qdma_rd, 0x1C, self->format.width * self->format.height);
 		io_write_reg(qdma_rd, 0x00, 0x01); // ap_start
 
 		pr_info("QDMA RD started...\n");
@@ -1257,7 +1257,7 @@ err0:
 	return ret;
 }
 
-static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, struct qvio_buffer* buf, struct qvio_buf_entry** ppBufEntry) {
+static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, struct qvio_buffer* buf, ssize_t buf_size, struct qvio_buf_entry** ppBufEntry) {
 	int ret;
 	struct qvio_buf_entry* buf_entry;
 	struct desc_item_t* pSgDescItems;
@@ -1276,6 +1276,7 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 	dma_addr_t dst_addr;
 	dma_addr_t nxt_addr;
 	int Nxt_adj;
+	ssize_t sg_bytes;
 
 	buf_entry = qvio_buf_entry_new();
 	if(! buf_entry) {
@@ -1354,17 +1355,12 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 			goto err1;
 		}
 
-		buf_entry->dsc_adr = pDmaBlock->dma_handle;
-		buf_entry->dsc_adj = nents - 1;
-#if 0
-		pr_warn("dsc_adr 0x%llx, dsc_adj %u\n", buf_entry->dsc_adr, buf_entry->dsc_adj);
-#endif
-
 		pSgdmaDesc = pDmaBlock->cpu_addr;
 		Nxt_adj = nents - 1;
 		dst_addr = 0xA0000000;
 
-		for (i = 0; i < nents; i++, sg = sg_next(sg), pSgdmaDesc++, dst_addr += sg_dma_len(sg), Nxt_adj--) {
+		sg_bytes = 0;
+		for (i = 0; i < nents && sg_bytes < buf_size; i++, sg = sg_next(sg), pSgdmaDesc++, Nxt_adj--) {
 			src_addr = sg_dma_address(sg);
 			nxt_addr = pDmaBlock->dma_handle + ((u8*)(pSgdmaDesc + 1) - (u8*)pDmaBlock->cpu_addr);
 
@@ -1383,6 +1379,9 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 			pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
 			pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
 #endif
+
+			sg_bytes += sg_dma_len(sg);
+			dst_addr += sg_dma_len(sg);
 		}
 
 #if 1
@@ -1390,6 +1389,12 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 		pSgdmaDesc->control |= cpu_to_le32(XDMA_DESC_STOPPED);
 		pSgdmaDesc->next_lo = 0;
 		pSgdmaDesc->next_hi = 0;
+#endif
+
+		buf_entry->dsc_adr = pDmaBlock->dma_handle;
+		buf_entry->dsc_adj = i - 1;
+#if 0
+		pr_warn("dsc_adr 0x%llx, dsc_adj %u\n", buf_entry->dsc_adr, buf_entry->dsc_adj);
 #endif
 
 		dma_sync_single_for_device(self->dev, pDmaBlock->dma_handle, PAGE_SIZE, DMA_FROM_DEVICE);
@@ -1411,17 +1416,12 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 			goto err1;
 		}
 
-		buf_entry->dsc_adr = pDmaBlock->dma_handle;
-		buf_entry->dsc_adj = nents - 1;
-#if 0
-		pr_warn("dsc_adr 0x%llx, dsc_adj %u\n", buf_entry->dsc_adr, buf_entry->dsc_adj);
-#endif
-
 		pSgdmaDesc = pDmaBlock->cpu_addr;
 		Nxt_adj = nents - 1;
 		src_addr = 0xA0000000;
 
-		for (i = 0; i < nents; i++, sg = sg_next(sg), pSgdmaDesc++, dst_addr += sg_dma_len(sg), Nxt_adj--) {
+		sg_bytes = 0;
+		for (i = 0; i < nents && sg_bytes < buf_size; i++, sg = sg_next(sg), pSgdmaDesc++, Nxt_adj--) {
 			dst_addr = sg_dma_address(sg);
 			nxt_addr = pDmaBlock->dma_handle + ((u8*)(pSgdmaDesc + 1) - (u8*)pDmaBlock->cpu_addr);
 
@@ -1440,6 +1440,9 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 			pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
 			pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
 #endif
+
+			sg_bytes += sg_dma_len(sg);
+			src_addr += sg_dma_len(sg);
 		}
 
 #if 1
@@ -1447,6 +1450,12 @@ static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, st
 		pSgdmaDesc->control |= cpu_to_le32(XDMA_DESC_STOPPED);
 		pSgdmaDesc->next_lo = 0;
 		pSgdmaDesc->next_hi = 0;
+#endif
+
+		buf_entry->dsc_adr = pDmaBlock->dma_handle;
+		buf_entry->dsc_adj = i - 1;
+#if 0
+		pr_warn("dsc_adr 0x%llx, dsc_adj %u\n", buf_entry->dsc_adr, buf_entry->dsc_adj);
 #endif
 
 		dma_sync_single_for_device(self->dev, pDmaBlock->dma_handle, PAGE_SIZE, DMA_FROM_DEVICE);
@@ -1544,7 +1553,9 @@ static long __file_ioctl_qbuf_userptr(struct file * filp, struct qvio_buffer* bu
 		goto err4;
 	}
 
-	ret = buf_entry_from_sgt(self, sgt, buf, &buf_entry);
+	dma_sync_sgtable_for_device(self->dev, sgt, dma_dir);
+
+	ret = buf_entry_from_sgt(self, sgt, buf, buf_size, &buf_entry);
 	if (ret) {
 		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
 		goto err5;
@@ -1584,6 +1595,7 @@ err0:
 static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf) {
 	struct qvio_device* self = filp->private_data;
 	long ret;
+	ssize_t buf_size;
 	struct dma_buf *dmabuf;
 	struct dma_buf_attachment *attach;
 	struct sg_table *sgt;
@@ -1591,6 +1603,14 @@ static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf
 	struct qvio_buf_entry* buf_entry;
 	struct qvio_buf_entry* next_entry;
 	unsigned long flags;
+
+	buf_size = calc_buf_size(&self->format, buf->offset, buf->stride);
+	if(buf_size <= 0) {
+		pr_err("unexpected value, buf_size=%ld\n", buf_size);
+		ret = buf_size;
+		goto err0;
+	}
+	// pr_info("buf_size=%lu\n", buf_size);
 
 	dmabuf = dma_buf_get(buf->u.fd);
 	if (IS_ERR(dmabuf)) {
@@ -1625,7 +1645,7 @@ static long __file_ioctl_qbuf_dmabuf(struct file * filp, struct qvio_buffer* buf
 
 	// sgt_dump(sgt, true);
 
-	ret = buf_entry_from_sgt(self, sgt, buf, &buf_entry);
+	ret = buf_entry_from_sgt(self, sgt, buf, buf_size, &buf_entry);
 	if (ret) {
 		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
 		goto err4;
@@ -1727,7 +1747,7 @@ static long __file_ioctl_qbuf_mmap(struct file * filp, struct qvio_buffer* buf) 
 
 	// sgt_dump(sgt, true);
 
-	ret = buf_entry_from_sgt(self, sgt, buf, &buf_entry);
+	ret = buf_entry_from_sgt(self, sgt, buf, buf_size, &buf_entry);
 	if (ret) {
 		pr_err("buf_entry_from_sgt() failed, err=%ld\n", ret);
 		goto err4;
@@ -3227,8 +3247,6 @@ static irqreturn_t __irq_handler_qdma_wr(int irq, void *dev_id) {
 	u32 value;
 	struct qvio_buf_entry* done_entry;
 	struct qvio_buf_entry* next_entry;
-	struct dma_block_t* pDmaBlock;
-	struct xdma_desc* pSgdmaDesc;
 
 #if 0
 	pr_info("QDMA-WR, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
@@ -3265,11 +3283,9 @@ static irqreturn_t __irq_handler_qdma_wr(int irq, void *dev_id) {
 		// job done wake up
 		wake_up_interruptible(&self->irq_wait);
 
+#if 1
 		// try to do another job
 		if(next_entry) {
-			pDmaBlock = &next_entry->desc_blocks[0];
-			pSgdmaDesc = pDmaBlock->cpu_addr;
-
 			io_write_reg(qdma_wr, 0x10, cpu_to_le32(PCI_DMA_L(next_entry->dsc_adr)));
 			io_write_reg(qdma_wr, 0x14, cpu_to_le32(PCI_DMA_H(next_entry->dsc_adr)));
 			io_write_reg(qdma_wr, 0x18, next_entry->dsc_adj);
@@ -3277,6 +3293,7 @@ static irqreturn_t __irq_handler_qdma_wr(int irq, void *dev_id) {
 		} else {
 			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
 		}
+#endif
 	}
 #endif
 
@@ -3289,10 +3306,8 @@ static irqreturn_t __irq_handler_qdma_rd(int irq, void *dev_id) {
 	u32 value;
 	struct qvio_buf_entry* done_entry;
 	struct qvio_buf_entry* next_entry;
-	struct dma_block_t* pDmaBlock;
-	struct xdma_desc* pSgdmaDesc;
 
-#if 1
+#if 0
 	pr_info("QDMA-RD, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
 	self->irq_counter++;
 #endif
@@ -3329,11 +3344,9 @@ static irqreturn_t __irq_handler_qdma_rd(int irq, void *dev_id) {
 
 		// try to do another job
 		if(next_entry) {
-			pDmaBlock = &next_entry->desc_blocks[0];
-			pSgdmaDesc = pDmaBlock->cpu_addr;
-
-			io_write_reg(qdma_rd, 0x10, (u32)(pSgdmaDesc->src_addr_lo));
-			io_write_reg(qdma_rd, 0x14, (u32)(pSgdmaDesc->src_addr_hi));
+			io_write_reg(qdma_rd, 0x10, cpu_to_le32(PCI_DMA_L(next_entry->dsc_adr)));
+			io_write_reg(qdma_rd, 0x14, cpu_to_le32(PCI_DMA_H(next_entry->dsc_adr)));
+			io_write_reg(qdma_rd, 0x18, next_entry->dsc_adj);
 			io_write_reg(qdma_rd, 0x00, 0x01); // ap_start
 		} else {
 			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);

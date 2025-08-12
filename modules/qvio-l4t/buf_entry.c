@@ -47,12 +47,14 @@ static void __buf_entry_free(struct kref *ref) {
 
 	switch(self->buf.buf_type) {
 	case QVIO_BUF_TYPE_MMAP:
+		dma_sync_sgtable_for_cpu(self->dev, self->u.userptr.sgt, self->dma_dir);
 		dma_unmap_sg(self->dev, self->u.mmap.sgt->sgl, self->u.mmap.sgt->nents, self->dma_dir);
 		sg_free_table(self->u.mmap.sgt);
 		kfree(self->u.mmap.sgt);
 		break;
 
 	case QVIO_BUF_TYPE_USERPTR:
+		dma_sync_sgtable_for_cpu(self->dev, self->u.userptr.sgt, self->dma_dir);
 		// dma_unmap_sg(self->dev, self->u.userptr.sgt->sgl, self->u.userptr.sgt->nents, self->dma_dir);
 		dma_unmap_sgtable(self->dev, self->u.userptr.sgt, self->dma_dir, DMA_ATTR_SKIP_CPU_SYNC);
 		sg_free_table(self->u.userptr.sgt);

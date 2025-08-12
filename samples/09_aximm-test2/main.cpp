@@ -50,7 +50,6 @@ namespace __09_aximm_test2__ {
 		int nHeight;
 		int nStride;
 		int nBuffers;
-		int nSize;
 		int nTimes;
 		qvio_buf_type nBufferType;
 
@@ -74,12 +73,12 @@ namespace __09_aximm_test2__ {
 
 			nWidth = 4096;
 			nHeight = 2160 * 2;
-			// nHeight = 2160;
+			// nHeight = 2160 * 2;
 			nStride = 4096;
 			nBuffers = 4;
-			nSize = nStride;
 			nTimes = nHeight;
 			nBufferType = QVIO_BUF_TYPE_USERPTR;
+			// nBufferType = QVIO_BUF_TYPE_DMABUF;
 
 			switch(1) { case 1:
 				std::shared_ptr<void> GUARD_NAME(NULL, [&](void*) {
@@ -364,7 +363,6 @@ namespace __09_aximm_test2__ {
 					}
 
 					if (FD_ISSET(fd_qvio, &readfds)) {
-						// LOGD("%d: QVIO_IOC_DQBUF", i);
 						int nBufIdx;
 						{
 							qvio_buffer args;
@@ -383,7 +381,8 @@ namespace __09_aximm_test2__ {
 
 						oStatBitRate.Log(nWidth * nHeight * 8, now);
 
-						// LOGD("%d: QVIO_IOC_QBUF, nBufIdx=%d", i, nBufIdx);
+						// LOGD("QVIO_IOC_QBUF, nBufIdx=%d", nBufIdx);
+#if 1
 						switch(nBufferType) {
 						case QVIO_BUF_TYPE_USERPTR:
 							err = EnqueueBuffer_sysbuf(nBufIdx, dir);
@@ -406,6 +405,9 @@ namespace __09_aximm_test2__ {
 							break;
 						}
 						nQbufs++;
+#else
+						break;
+#endif
 					}
 				}
 #else
