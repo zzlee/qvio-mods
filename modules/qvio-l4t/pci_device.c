@@ -12,6 +12,8 @@
 
 #include "xvidc.h"
 
+struct qvio_cdev_class g_qvio_class;
+
 #define DRV_MODULE_NAME "qvio-l4t"
 
 /* Interrupt Status and Control */
@@ -3972,7 +3974,7 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 
 	self->cdev.fops = &__fops;
 	self->cdev.private_data = self;
-	err = qvio_cdev_start(&self->cdev);
+	err = qvio_cdev_start(&self->cdev, &g_qvio_class);
 	if(err) {
 		pr_err("qvio_cdev_start() failed, err=%d\n", err);
 		goto err5;
@@ -4002,7 +4004,7 @@ static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 err8:
 	dma_blocks_free(self);
 err7:
-	qvio_cdev_stop(&self->cdev);
+	qvio_cdev_stop(&self->cdev, &g_qvio_class);
 err6:
 	dma_pool_destroy(self->desc_pool);
 err5:
@@ -4029,7 +4031,7 @@ static void __pci_remove(struct pci_dev *pdev) {
 
 	remove_dev_attrs(&pdev->dev);
 	dma_blocks_free(self);
-	qvio_cdev_stop(&self->cdev);
+	qvio_cdev_stop(&self->cdev, &g_qvio_class);
 	free_irqs(self);
 	disable_msi_msix(self, pdev);
 	unmap_bars(self);
@@ -4137,14 +4139,22 @@ int qvio_device_pci_register(void) {
 
 	pr_info("\n");
 
+	err = qvio_cdev_register(&g_qvio_class, 0, 255, "qvio");
+	if(err) {
+		pr_err("qvio_cdev_register() failed\n");
+		goto err0;
+	}
+
 	err = pci_register_driver(&pci_driver);
 	if(err) {
 		pr_err("pci_register_driver() failed\n");
-		goto err0;
+		goto err1;
 	}
 
 	return err;
 
+err1:
+	qvio_cdev_unregister(&g_qvio_class);
 err0:
 	return err;
 }
@@ -4153,4 +4163,5 @@ void qvio_device_pci_unregister(void) {
 	pr_info("\n");
 
 	pci_unregister_driver(&pci_driver);
+	qvio_cdev_unregister(&g_qvio_class);
 }

@@ -6,64 +6,61 @@
 #include <linux/device.h>
 #include <linux/fs.h>
 
-#define QVIO_NODE_NAME		"qvio"
-#define QVIO_MINOR_BASE		(0)
-#define QVIO_MINOR_COUNT	(255)
-
-static struct class *g_class = NULL;
-static int g_major = 0;
-static int g_cdevno_base = 0;
-
-int qvio_cdev_register(void) {
+int qvio_cdev_register(struct qvio_cdev_class* self, unsigned base, unsigned count, const char * name) {
 	int err;
 	dev_t dev;
 
 	// pr_info("\n");
 
+	self->base = base;
+	self->count = count;
+	self->name = name;
+
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(6,4,0)
-	g_class = class_create(THIS_MODULE, QVIO_NODE_NAME);
+	self->cls = class_create(THIS_MODULE, name);
 #else
-	g_class = class_create(QVIO_NODE_NAME);
+	self->cls = class_create(name);
 #endif
-	if (IS_ERR(g_class)) {
-		pr_err("class_create() failed, g_class=%p\n", g_class);
+	if (IS_ERR(self->cls)) {
+		pr_err("class_create() failed, self->cls=%p\n", self->cls);
 		err = -EINVAL;
 		goto err0;
 	}
 
-	err = alloc_chrdev_region(&dev, QVIO_MINOR_BASE, QVIO_MINOR_COUNT, QVIO_NODE_NAME);
+	err = alloc_chrdev_region(&dev, base, count, name);
 	if (err) {
 		pr_err("alloc_chrdev_region() failed, err=%d\n", err);
 		goto err1;
 	}
 
-	g_major = MAJOR(dev);
-	// pr_info("g_major=%d\n", g_major);
+	self->major = MAJOR(dev);
+	// pr_info("self->major=%d\n", MAJOR(dev));
 
-	g_cdevno_base = 0;
+	self->next_minor = base;
 
 	return err;
 
 err1:
-	class_destroy(g_class);
+	class_destroy(self->cls);
 err0:
 	return err;
 }
 
-void qvio_cdev_unregister(void) {
+void qvio_cdev_unregister(struct qvio_cdev_class* self) {
 	// pr_info("\n");
 
-	unregister_chrdev_region(MKDEV(g_major, QVIO_MINOR_BASE), QVIO_MINOR_COUNT);
-	class_destroy(g_class);
+	unregister_chrdev_region(MKDEV(self->major, self->base), self->count);
+	class_destroy(self->cls);
 }
 
-int qvio_cdev_start(struct qvio_cdev* self) {
+int qvio_cdev_start(struct qvio_cdev* self, struct qvio_cdev_class* cls) {
 	int err;
 	struct device* new_device;
+	char name[PATH_MAX];
 
 	// pr_info("\n");
 
-	self->cdevno = MKDEV(g_major, g_cdevno_base++);
+	self->cdevno = MKDEV(cls->major, cls->next_minor);
 	cdev_init(&self->cdev, self->fops);
 	self->cdev.owner = THIS_MODULE;
 	err = cdev_add(&self->cdev, self->cdevno, 1);
@@ -72,12 +69,15 @@ int qvio_cdev_start(struct qvio_cdev* self) {
 		goto err0;
 	}
 
-	new_device = device_create(g_class, NULL, self->cdevno, self,
-		QVIO_NODE_NAME "%d", MINOR(self->cdevno));
+	sprintf(name, "%s%%d", cls->name);
+
+	new_device = device_create(cls->cls, NULL, self->cdevno, self, name, MINOR(self->cdevno));
 	if (IS_ERR(new_device)) {
 		pr_err("device_create() failed, new_device=%p\n", new_device);
 		goto err1;
 	}
+
+	cls->next_minor++;
 
 	return 0;
 
@@ -87,10 +87,10 @@ err0:
 	return err;
 }
 
-void qvio_cdev_stop(struct qvio_cdev* self) {
+void qvio_cdev_stop(struct qvio_cdev* self, struct qvio_cdev_class* cls) {
 	// pr_info("\n");
 
-	device_destroy(g_class, self->cdevno);
+	device_destroy(cls->cls, self->cdevno);
 	cdev_del(&self->cdev);
 }
 

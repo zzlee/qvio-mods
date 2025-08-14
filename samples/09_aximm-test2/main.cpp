@@ -73,6 +73,7 @@ namespace __09_aximm_test2__ {
 			LOGD("%s::%s", typeid(self_t).name(), __FUNCTION__);
 
 			nFmt = fourcc('Y', '8', '0', '0');
+			// nFmt = fourcc('N', 'V', '1', '6');
 			nWidth = 4096;
 			nHeight = 2160;
 			nStride = 4096;
