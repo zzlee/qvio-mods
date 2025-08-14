@@ -46,6 +46,7 @@ namespace __09_aximm_test2__ {
 
 		ZzUtils::FreeStack oFreeStack;
 
+		int nFmt;
 		int nWidth;
 		int nHeight;
 		int nStride;
@@ -71,14 +72,14 @@ namespace __09_aximm_test2__ {
 
 			LOGD("%s::%s", typeid(self_t).name(), __FUNCTION__);
 
+			nFmt = fourcc('Y', '8', '0', '0');
 			nWidth = 4096;
-			nHeight = 2160 * 2;
-			// nHeight = 2160 * 2;
+			nHeight = 2160;
 			nStride = 4096;
 			nBuffers = 4;
 			nTimes = nHeight;
-			nBufferType = QVIO_BUF_TYPE_USERPTR;
-			// nBufferType = QVIO_BUF_TYPE_DMABUF;
+			// nBufferType = QVIO_BUF_TYPE_USERPTR;
+			nBufferType = QVIO_BUF_TYPE_DMABUF;
 
 			switch(1) { case 1:
 				std::shared_ptr<void> GUARD_NAME(NULL, [&](void*) {
@@ -100,7 +101,7 @@ namespace __09_aximm_test2__ {
 					memset(&args, 0, sizeof(args));
 					args.width = nWidth;
 					args.height = nHeight;
-					args.fmt = fourcc('Y', '8', '0', '0');
+					args.fmt = nFmt;
 					err = ioctl(fd_qvio, QVIO_IOC_S_FMT, &args);
 					if(err) {
 						err = errno;
@@ -111,8 +112,19 @@ namespace __09_aximm_test2__ {
 
 				pSysBufs.resize(nBuffers);
 				for(int i = 0;i < pSysBufs.size();i++) {
+					int size;
+					if(nFmt == fourcc('Y', '8', '0', '0')) {
+						size = nStride * nHeight;
+					} else if(nFmt == fourcc('N', 'V', '1', '6')) {
+						size = nStride * nHeight * 2;
+					} else {
+						err = EINVAL;
+						LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
+						break;
+					}
+
 					void *memptr;
-					err = posix_memalign(&memptr, 4096, nStride * nHeight);
+					err = posix_memalign(&memptr, 4096, size);
 					if (err) {
 						LOGE("%s(%d): posix_memalign failed, err=%d", __FUNCTION__, __LINE__, err);
 						break;
@@ -134,7 +146,15 @@ namespace __09_aximm_test2__ {
 				oNVBufParam.layout = NVBUF_LAYOUT_PITCH;
 				oNVBufParam.memType = NVBUF_MEM_DEFAULT;
 				oNVBufParam.gpuId = 0;
-				oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_GRAY8;
+				if(nFmt == fourcc('Y', '8', '0', '0')) {
+					oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_GRAY8;
+				} else if(nFmt == fourcc('N', 'V', '1', '6')) {
+					oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_NV16;
+				} else {
+					err = EINVAL;
+					LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
+					break;
+				}
 
 				pNVBuf_surfaces.resize(nBuffers);
 				for(int i = 0;i < pNVBuf_surfaces.size();i++) {
@@ -227,8 +247,21 @@ namespace __09_aximm_test2__ {
 				args.buf_type = QVIO_BUF_TYPE_USERPTR;
 				args.buf_dir = dir;
 				args.u.userptr = (unsigned long)pSysBufs[nIndex];
-				args.offset[0] = 0;
-				args.stride[0] = nStride;
+
+				if(nFmt == fourcc('Y', '8', '0', '0')) {
+					args.offset[0] = 0;
+					args.stride[0] = nStride;
+				} else if(nFmt == fourcc('N', 'V', '1', '6')) {
+					args.offset[0] = 0;
+					args.stride[0] = nStride;
+					args.offset[1] = nStride * nHeight;
+					args.stride[1] = nStride;
+				} else {
+					err = EINVAL;
+					LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
+					break;
+				}
+
 				err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
 				if(err) {
 					err = errno;
@@ -254,6 +287,8 @@ namespace __09_aximm_test2__ {
 				args.u.fd = (int)surfaceParams.bufferDesc;
 				args.offset[0] = surfaceParams.planeParams.offset[0];
 				args.stride[0] = surfaceParams.planeParams.pitch[0];
+				args.offset[1] = surfaceParams.planeParams.offset[1];
+				args.stride[1] = surfaceParams.planeParams.pitch[1];
 				err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
 				if(err) {
 					err = errno;
