@@ -10,12 +10,6 @@
 #define QVIO_MAX_DESC_BLOCKS	16
 #define QVIO_MAX_PLANES			4
 
-struct qvio_buf_regs {
-	dma_addr_t desc_dma_handle;
-	u32 desc_items;
-	dma_addr_t dst_dma_handle;
-};
-
 struct qvio_buf_entry {
 	struct kref ref;
 	struct list_head node;
@@ -44,10 +38,7 @@ struct qvio_buf_entry {
 	struct dma_pool* desc_pool;
 	struct dma_block_t desc_blocks[QVIO_MAX_DESC_BLOCKS];
 
-	// vars for multi-planar DMA
-	struct qvio_buf_regs buf_regs[QVIO_MAX_PLANES];
-
-	// vars for XDMA regs
+	// vars for XDMA/QDMA regs
 	dma_addr_t dsc_adr;
 	u16 dsc_adj;
 };

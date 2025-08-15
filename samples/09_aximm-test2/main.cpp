@@ -25,10 +25,6 @@
 
 #include "qvio-l4t.h"
 
-#define CONCAT_I(N, S) N ## S
-#define CONCAT(N, S) CONCAT_I(N, S)
-#define GUARD_NAME CONCAT(__GUARD_, __LINE__)
-
 ZZ_INIT_LOG("09_aximm-test2")
 
 using namespace __zz_clock__;
@@ -79,11 +75,11 @@ namespace __09_aximm_test2__ {
 			nStride = 4096;
 			nBuffers = 4;
 			nTimes = nHeight;
-			// nBufferType = QVIO_BUF_TYPE_USERPTR;
-			nBufferType = QVIO_BUF_TYPE_DMABUF;
+			nBufferType = QVIO_BUF_TYPE_USERPTR;
+			// nBufferType = QVIO_BUF_TYPE_DMABUF;
 
 			switch(1) { case 1:
-				std::shared_ptr<void> GUARD_NAME(NULL, [&](void*) {
+				ZzUtils::Scoped ZZ_GUARD_NAME([&]() {
 					oFreeStack.Flush();
 				});
 

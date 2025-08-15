@@ -121,7 +121,7 @@ static int __remove(struct platform_device *pdev) {
 	return 0;
 }
 
-int qvio_device_platform_register(void) {
+int qvio_platform_device_register(void) {
 	int err;
 
 	pr_info("\n");
@@ -138,7 +138,7 @@ err0:
 	return err;
 }
 
-void qvio_device_platform_unregister(void) {
+void qvio_platform_device_unregister(void) {
 	pr_info("\n");
 
 	platform_driver_unregister(&__driver);

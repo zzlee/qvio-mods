@@ -34,6 +34,17 @@ namespace ZzUtils {
 		void Flush();
 	};
 
+	struct Scoped {
+		std::function<void()> d;
+
+		explicit Scoped(const std::function<void()>& d) : d(d) {
+		}
+
+		~Scoped() {
+			d();
+		}
+	};
+
 	struct ZzStatBitRate {
 		std::string log_prefix;
 

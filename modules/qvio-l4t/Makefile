@@ -10,7 +10,11 @@ qvio-objs := \
 	cdev.o \
 	umods.o \
 	buf_entry.o \
-	dma_block.o
+	dma_block.o \
+	utils.o \
+	video_queue.o \
+	zdev.o \
+	qdma_wr.o
 
 # qvio-objs += \
 # 	video.o \

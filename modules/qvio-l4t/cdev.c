@@ -10,7 +10,7 @@ int qvio_cdev_register(struct qvio_cdev_class* self, unsigned base, unsigned cou
 	int err;
 	dev_t dev;
 
-	// pr_info("\n");
+	// pr_info("%d, %d, %s\n", base, count, name);
 
 	self->base = base;
 	self->count = count;
@@ -56,9 +56,9 @@ void qvio_cdev_unregister(struct qvio_cdev_class* self) {
 int qvio_cdev_start(struct qvio_cdev* self, struct qvio_cdev_class* cls) {
 	int err;
 	struct device* new_device;
-	char name[PATH_MAX];
+	char name[256];
 
-	// pr_info("\n");
+	// pr_info("self=%p, cls=%p\n", self, cls);
 
 	self->cdevno = MKDEV(cls->major, cls->next_minor);
 	cdev_init(&self->cdev, self->fops);
@@ -88,7 +88,7 @@ err0:
 }
 
 void qvio_cdev_stop(struct qvio_cdev* self, struct qvio_cdev_class* cls) {
-	// pr_info("\n");
+	// pr_info("self=%p, cls=%p\n", self, cls);
 
 	device_destroy(cls->cls, self->cdevno);
 	cdev_del(&self->cdev);
