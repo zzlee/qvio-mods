@@ -50,7 +50,6 @@ namespace __10_qdma__ {
 		int nTimes;
 		qvio_buf_type nBufferType;
 
-		int fd_qvio;
 		std::vector<uint8_t*> pSysBufs;
 #if BUILD_WITH_NVBUF
 		std::vector<NvBufSurface*> pNVBuf_surfaces;
@@ -171,6 +170,10 @@ namespace __10_qdma__ {
 						case '1':
 							OnTest1(now, "/dev/qdma_wr0", QVIO_BUF_DIR_FROM_DEVICE);
 							break;
+
+						case '2':
+							OnTest1(now, "/dev/qdma_rd0", QVIO_BUF_DIR_TO_DEVICE);
+							break;
 						}
 					}
 
@@ -181,7 +184,7 @@ namespace __10_qdma__ {
 			return err;
 		}
 
-		int EnqueueBuffer_sysbuf(int nIndex, qvio_buf_dir dir) {
+		int EnqueueBuffer_sysbuf(int fd, int nIndex, qvio_buf_dir dir) {
 			int err;
 
 			switch(1) { case 1:
@@ -207,7 +210,7 @@ namespace __10_qdma__ {
 					break;
 				}
 
-				err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
+				err = ioctl(fd, QVIO_IOC_QBUF, &args);
 				if(err) {
 					err = errno;
 					LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
@@ -218,7 +221,7 @@ namespace __10_qdma__ {
 			return err;
 		}
 
-		int EnqueueBuffer_nvbuf(int nIndex, qvio_buf_dir dir) {
+		int EnqueueBuffer_nvbuf(int fd, int nIndex, qvio_buf_dir dir) {
 			int err;
 
 			switch(1) { case 1:
@@ -234,7 +237,7 @@ namespace __10_qdma__ {
 				args.stride[0] = surfaceParams.planeParams.pitch[0];
 				args.offset[1] = surfaceParams.planeParams.offset[1];
 				args.stride[1] = surfaceParams.planeParams.pitch[1];
-				err = ioctl(fd_qvio, QVIO_IOC_QBUF, &args);
+				err = ioctl(fd, QVIO_IOC_QBUF, &args);
 				if(err) {
 					err = errno;
 					LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
@@ -249,22 +252,24 @@ namespace __10_qdma__ {
 			int err;
 
 			switch(1) { case 1:
-				fd_qvio = open(dev_name, O_RDWR);
+				int fd_qvio = open(dev_name, O_RDWR);
 				if(fd_qvio == -1) {
 					err = errno;
 					LOGE("%s(%d): open() failed, err=%d", __FUNCTION__, __LINE__, err);
 					break;
 				}
-				ZzUtils::Scoped ZZ_GUARD_NAME([&]() {
+				LOGD("open(\"%s\")=%d...\n", dev_name, fd_qvio);
+				ZzUtils::Scoped ZZ_GUARD_NAME([fd_qvio, dev_name]() {
+					LOGD("close(\"%s\")=%d...\n", dev_name, fd_qvio);
 					close(fd_qvio);
 				});
 
 				{
 					qvio_format args;
 					memset(&args, 0, sizeof(args));
+					args.fmt = nFmt;
 					args.width = nWidth;
 					args.height = nHeight;
-					args.fmt = nFmt;
 					err = ioctl(fd_qvio, QVIO_IOC_S_FMT, &args);
 					if(err) {
 						err = errno;
@@ -281,11 +286,11 @@ namespace __10_qdma__ {
 					for(int i = 0;i < nBuffers;i++) {
 						switch(nBufferType) {
 						case QVIO_BUF_TYPE_USERPTR:
-							err = EnqueueBuffer_sysbuf(i, dir);
+							err = EnqueueBuffer_sysbuf(fd_qvio, i, dir);
 							break;
 
 						case QVIO_BUF_TYPE_DMABUF:
-							err = EnqueueBuffer_nvbuf(i, dir);
+							err = EnqueueBuffer_nvbuf(fd_qvio, i, dir);
 							break;
 
 						default:
@@ -380,11 +385,11 @@ namespace __10_qdma__ {
 #if 1
 						switch(nBufferType) {
 						case QVIO_BUF_TYPE_USERPTR:
-							err = EnqueueBuffer_sysbuf(nBufIdx, dir);
+							err = EnqueueBuffer_sysbuf(fd_qvio, nBufIdx, dir);
 							break;
 
 						case QVIO_BUF_TYPE_DMABUF:
-							err = EnqueueBuffer_nvbuf(nBufIdx, dir);
+							err = EnqueueBuffer_nvbuf(fd_qvio, nBufIdx, dir);
 							break;
 
 						default:

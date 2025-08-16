@@ -6,7 +6,7 @@
 #include <linux/fs.h>
 #include <linux/delay.h>
 
-#include "qdma_wr.h"
+#include "qdma_rd.h"
 #include "uapi/qvio-l4t.h"
 #include "xdma_desc.h"
 #include "utils.h"
@@ -30,12 +30,12 @@ static const struct file_operations __fops = {
 	.unlocked_ioctl = __file_ioctl,
 };
 
-int qvio_qdma_wr_register(void) {
+int qvio_qdma_rd_register(void) {
 	int err;
 
 	pr_info("\n");
 
-	err = qvio_cdev_register(&__cdev_class, 0, 255, "qdma_wr");
+	err = qvio_cdev_register(&__cdev_class, 0, 255, "qdma_rd");
 	if(err) {
 		pr_err("qvio_cdev_register() failed\n");
 		goto err0;
@@ -47,15 +47,15 @@ err0:
 	return err;
 }
 
-void qvio_qdma_wr_unregister(void) {
+void qvio_qdma_rd_unregister(void) {
 	pr_info("\n");
 
 	qvio_cdev_unregister(&__cdev_class);
 }
 
-struct qvio_qdma_wr* qvio_qdma_wr_new(void) {
+struct qvio_qdma_rd* qvio_qdma_rd_new(void) {
 	int err;
-	struct qvio_qdma_wr* self = kzalloc(sizeof(struct qvio_qdma_wr), GFP_KERNEL);
+	struct qvio_qdma_rd* self = kzalloc(sizeof(struct qvio_qdma_rd), GFP_KERNEL);
 
 	if(! self) {
 		pr_err("kzalloc() failed\n");
@@ -86,7 +86,7 @@ err0:
 	return NULL;
 }
 
-struct qvio_qdma_wr* qvio_qdma_wr_get(struct qvio_qdma_wr* self) {
+struct qvio_qdma_rd* qvio_qdma_rd_get(struct qvio_qdma_rd* self) {
 	if (self)
 		kref_get(&self->ref);
 
@@ -94,7 +94,7 @@ struct qvio_qdma_wr* qvio_qdma_wr_get(struct qvio_qdma_wr* self) {
 }
 
 static void __free(struct kref *ref) {
-	struct qvio_qdma_wr* self = container_of(ref, struct qvio_qdma_wr, ref);
+	struct qvio_qdma_rd* self = container_of(ref, struct qvio_qdma_rd, ref);
 
 	// pr_info("\n");
 
@@ -102,12 +102,12 @@ static void __free(struct kref *ref) {
 	kfree(self);
 }
 
-void qvio_qdma_wr_put(struct qvio_qdma_wr* self) {
+void qvio_qdma_rd_put(struct qvio_qdma_rd* self) {
 	if (self)
 		kref_put(&self->ref, __free);
 }
 
-int qvio_qdma_wr_probe(struct qvio_qdma_wr* self) {
+int qvio_qdma_rd_probe(struct qvio_qdma_rd* self) {
 	int err;
 	uintptr_t reg_zdev = (uintptr_t)self->reg_zdev;
 	int reset_mask;
@@ -116,15 +116,15 @@ int qvio_qdma_wr_probe(struct qvio_qdma_wr* self) {
 	self->video_queue->dev = self->dev;
 	self->video_queue->device_id = self->device_id;
 
-	self->desc_pool = dma_pool_create("qdma_wr", self->dev, PAGE_SIZE, 32, 0);
+	self->desc_pool = dma_pool_create("qdma_rd", self->dev, PAGE_SIZE, 32, 0);
 	if(!self->desc_pool) {
 		pr_err("dma_pool_create() failed\n");
 		err = -ENOMEM;
 		goto err0;
 	}
 
-	pr_info("reset qdma_wr...\n");
-	reset_mask = 0x01; // [x, x, qdma_wr]
+	pr_info("reset qdma_rd...\n");
+	reset_mask = 0x02; // [x, qdma_rd, x]
 	value = io_read_reg(reg_zdev, 0x10);
 	io_write_reg(reg_zdev, 0x10, value & ~reset_mask);
 	msleep(100);
@@ -146,14 +146,14 @@ err0:
 	return err;
 }
 
-void qvio_qdma_wr_remove(struct qvio_qdma_wr* self) {
+void qvio_qdma_rd_remove(struct qvio_qdma_rd* self) {
 	qvio_cdev_stop(&self->cdev, &__cdev_class);
 	dma_pool_destroy(self->desc_pool);
 }
 
 static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg) {
 	long ret;
-	struct qvio_qdma_wr* self = filp->private_data;
+	struct qvio_qdma_rd* self = filp->private_data;
 
 	ret = qvio_video_queue_file_ioctl(self->video_queue, filp, cmd, arg);
 	if(ret == -ENOSYS) {
@@ -171,14 +171,14 @@ static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg
 }
 
 static __poll_t __file_poll(struct file *filp, struct poll_table_struct *wait) {
-	struct qvio_qdma_wr* self = filp->private_data;
+	struct qvio_qdma_rd* self = filp->private_data;
 
 	return qvio_video_queue_file_poll(self->video_queue, filp, wait);
 }
 
-irqreturn_t qvio_qdma_wr_irq_handler(int irq, void *dev_id) {
+irqreturn_t qdma_rd_irq_handler(int irq, void *dev_id) {
 	int err;
-	struct qvio_qdma_wr* self = dev_id;
+	struct qvio_qdma_rd* self = dev_id;
 	uintptr_t reg = (uintptr_t)self->reg;
 	u32 value;
 	struct qvio_buf_entry* next_entry;
@@ -194,7 +194,7 @@ irqreturn_t qvio_qdma_wr_irq_handler(int irq, void *dev_id) {
 
 	if(value & 0x01) {
 #if 0
-		pr_info("QDMA-WR, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+		pr_info("QDMA-RD, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
 		self->irq_counter++;
 #endif
 
@@ -225,7 +225,7 @@ err0:
 
 static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* sgt, struct qvio_buffer* buf, struct qvio_buf_entry* buf_entry) {
 	int err;
-	struct qvio_qdma_wr* qdma_wr = self->parent;
+	struct qvio_qdma_rd* qdma_rd = self->parent;
 	struct scatterlist* sg;
 	int nents;
 	ssize_t buf_size;
@@ -238,8 +238,8 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 	ssize_t sg_bytes;
 	int i;
 
-	buf_entry->dev = qdma_wr->dev;
-	buf_entry->desc_pool = qdma_wr->desc_pool;
+	buf_entry->dev = qdma_rd->dev;
+	buf_entry->desc_pool = qdma_rd->desc_pool;
 
 	sg = sgt->sgl;
 	nents = sgt->nents;
@@ -266,16 +266,16 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 
 	pSgdmaDesc = pDmaBlock->cpu_addr;
 	Nxt_adj = nents - 1;
-	src_addr = 0xA0000000;
+	dst_addr = 0xA0000000;
 
 	sg_bytes = 0;
 	for (i = 0; i < nents && sg_bytes < buf_size; i++, sg = sg_next(sg), pSgdmaDesc++, Nxt_adj--) {
-		dst_addr = sg_dma_address(sg);
+		src_addr = sg_dma_address(sg);
 		nxt_addr = pDmaBlock->dma_handle + ((u8*)(pSgdmaDesc + 1) - (u8*)pDmaBlock->cpu_addr);
 
 #if 0
-		pr_warn("%d, src_addr 0x%llx, dst_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d len %d\n",
-			i, src_addr, dst_addr, nxt_addr, Nxt_adj, sg_dma_len(sg));
+		pr_warn("%d, src_addr 0x%llx, src_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d len %d\n",
+			i, src_addr, src_addr, nxt_addr, Nxt_adj, sg_dma_len(sg));
 #endif
 
 #if 1
@@ -290,7 +290,7 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 #endif
 
 		sg_bytes += sg_dma_len(sg);
-		src_addr += sg_dma_len(sg);
+		dst_addr += sg_dma_len(sg);
 	}
 
 #if 1
@@ -315,8 +315,8 @@ err0:
 }
 
 static int __start_buf_entry(struct qvio_video_queue* self, struct qvio_buf_entry* buf_entry) {
-	struct qvio_qdma_wr* qdma_wr = self->parent;
-	uintptr_t reg = (uintptr_t)qdma_wr->reg;
+	struct qvio_qdma_rd* qdma_rd = self->parent;
+	uintptr_t reg = (uintptr_t)qdma_rd->reg;
 	struct dma_block_t* pDmaBlock;
 	struct xdma_desc* pSgdmaDesc;
 
@@ -333,20 +333,20 @@ static int __start_buf_entry(struct qvio_video_queue* self, struct qvio_buf_entr
 	io_write_reg(reg, 0x1C, self->format.width * self->format.height);
 	io_write_reg(reg, 0x00, 0x01); // ap_start
 
-	pr_info("QDMA WR started...\n");
+	pr_info("QDMA RD started...\n");
 
 	return 0;
 }
 
 static int __streamon(struct qvio_video_queue* self) {
-	struct qvio_qdma_wr* qdma_wr = self->parent;
-	uintptr_t reg_zdev = (uintptr_t)qdma_wr->reg_zdev;
-	uintptr_t reg = (uintptr_t)qdma_wr->reg;
+	struct qvio_qdma_rd* qdma_rd = self->parent;
+	uintptr_t reg_zdev = (uintptr_t)qdma_rd->reg_zdev;
+	uintptr_t reg = (uintptr_t)qdma_rd->reg;
 	int reset_mask;
 	u32 value;
 
-	pr_info("reset qdma_wr...\n");
-	reset_mask = 0x01; // [x, x, qdma_wr]
+	pr_info("reset qdma_rd...\n");
+	reset_mask = 0x02; // [x, qdma_rd, x]
 	value = io_read_reg(reg_zdev, 0x10);
 	io_write_reg(reg_zdev, 0x10, value & ~reset_mask);
 	msleep(100);
@@ -361,9 +361,9 @@ static int __streamon(struct qvio_video_queue* self) {
 }
 
 static int __streamoff(struct qvio_video_queue* self) {
-	struct qvio_qdma_wr* qdma_wr = self->parent;
-	uintptr_t reg_zdev = (uintptr_t)qdma_wr->reg_zdev;
-	uintptr_t reg = (uintptr_t)qdma_wr->reg;
+	struct qvio_qdma_rd* qdma_rd = self->parent;
+	uintptr_t reg_zdev = (uintptr_t)qdma_rd->reg_zdev;
+	uintptr_t reg = (uintptr_t)qdma_rd->reg;
 	int reset_mask;
 	u32 value;
 	int i;
@@ -380,8 +380,8 @@ static int __streamoff(struct qvio_video_queue* self) {
 		msleep(100);
 	}
 
-	pr_info("reset qdma_wr...\n");
-	reset_mask = 0x01; // [x, x, qdma_wr]
+	pr_info("reset qdma_rd...\n");
+	reset_mask = 0x02; // [x, qdma_rd, x]
 	value = io_read_reg(reg_zdev, 0x10);
 	io_write_reg(reg_zdev, 0x10, value & ~reset_mask);
 	msleep(100);

@@ -34,6 +34,6 @@ void qvio_qdma_wr_put(struct qvio_qdma_wr* self);
 int qvio_qdma_wr_probe(struct qvio_qdma_wr* self);
 void qvio_qdma_wr_remove(struct qvio_qdma_wr* self);
 
-irqreturn_t qdma_wr_irq_handler(int irq, void *dev_id);
+irqreturn_t qvio_qdma_wr_irq_handler(int irq, void *dev_id);
 
 #endif // __QVIO_QDMA_WR_H__

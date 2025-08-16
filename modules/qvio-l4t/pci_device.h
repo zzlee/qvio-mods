@@ -8,6 +8,7 @@
 #include "dma_block.h"
 #include "zdev.h"
 #include "qdma_wr.h"
+#include "qdma_rd.h"
 
 struct qvio_pci_device {
 	struct kref ref;
@@ -39,6 +40,7 @@ struct qvio_pci_device {
 	struct qvio_zdev* zdev;
 	void __iomem * reg_intr;
 	struct qvio_qdma_wr* qdma_wr;
+	struct qvio_qdma_rd* qdma_rd;
 };
 
 int qvio_pci_device_register(void);

@@ -14,7 +14,8 @@ qvio-objs := \
 	utils.o \
 	video_queue.o \
 	zdev.o \
-	qdma_wr.o
+	qdma_wr.o \
+	qdma_rd.o
 
 # qvio-objs += \
 # 	video.o \

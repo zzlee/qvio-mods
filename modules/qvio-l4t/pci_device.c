@@ -86,6 +86,11 @@ static int device_7024_probe(struct qvio_pci_device* self);
 static void device_7024_remove(struct qvio_pci_device* self);
 static int device_7024_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev);
 static void device_7024_free_irqs(struct qvio_pci_device* self);
+static irqreturn_t device_7024_irq_handler(int irq, void *dev_id);
+static int device_e382_probe(struct qvio_pci_device* self);
+static void device_e382_remove(struct qvio_pci_device* self);
+static int device_e382_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev);
+static void device_e382_free_irqs(struct qvio_pci_device* self);
 
 static const struct pci_device_id __pci_ids[] = {
 	{ PCI_DEVICE(0x12AB, 0xE380), },
@@ -1039,6 +1044,10 @@ static void disable_msi_msix(struct qvio_pci_device* self, struct pci_dev* pdev)
 
 static void free_irqs(struct qvio_pci_device* self) {
 	switch(self->device_id & 0xFFFF) {
+	case 0xE382:
+		device_e382_free_irqs(self);
+		break;
+
 	case 0x7024:
 		device_7024_free_irqs(self);
 		break;
@@ -1049,6 +1058,14 @@ static int irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev) {
 	int err;
 
 	switch(self->device_id & 0xFFFF) {
+	case 0xE382:
+		err = device_e382_irq_setup(self, pdev);
+		if(err) {
+			pr_err("device_e382_irq_setup() failed, err=%d\n", err);
+			goto err0;
+		}
+		break;
+
 	case 0x7024:
 		err = device_7024_irq_setup(self, pdev);
 		if(err) {
@@ -1173,201 +1190,6 @@ static void remove_dev_attrs(struct device* dev) {
 	device_remove_file(dev, &dev_attr_dma_sync);
 	device_remove_file(dev, &dev_attr_dma_block);
 }
-
-#if 0
-static int setup_e380(struct qvio_device* self) {
-	int err;
-	int i;
-	u32 nIsIdle;
-	u32 value;
-	int reset_mask;
-
-#if 1
-	pr_info("reset all IPs...\n");
-	reset_mask = 0x1F; // [aximm_test0, z_frmbuf_writer, aximm_test1, pcie_intr, tpg]
-	value = *(u32*)((u8*)self->zzlab_env + 0x24);
-	*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask;
-	msleep(100);
-	*(u32*)((u8*)self->zzlab_env + 0x24) = value | reset_mask;
-#endif
-
-	self->xaximm_test0.Control_BaseAddress = (u64)self->bar[0] + 0x40000;
-	self->xaximm_test0.IsReady = XIL_COMPONENT_IS_READY;
-	pr_info("xaximm_test0 = %p\n", (void*)self->xaximm_test0.Control_BaseAddress);
-
-	self->xaximm_test1.Control_BaseAddress = (u64)self->bar[0] + 0x20000;
-	self->xaximm_test1.IsReady = XIL_COMPONENT_IS_READY;
-	pr_info("xaximm_test1 = %p\n", (void*)self->xaximm_test1.Control_BaseAddress);
-
-	self->xFrmBufWr.Control_BaseAddress = (u64)self->bar[0] + 0x30000;
-	self->xFrmBufWr.IsReady = XIL_COMPONENT_IS_READY;
-	pr_info("xFrmBufWr = %p\n", (void*)self->xFrmBufWr.Control_BaseAddress);
-
-	self->xTpg.Config.DeviceId = 0;
-	self->xTpg.Config.BaseAddress = (u64)self->bar[0] + 0x10000;
-	self->xTpg.Config.HasAxi4sSlave = 0;
-	self->xTpg.Config.PixPerClk = 8;
-	self->xTpg.Config.NumVidComponents = 3;
-	self->xTpg.Config.MaxWidth = 4096;
-	self->xTpg.Config.MaxHeight = 2160;
-	self->xTpg.Config.MaxDataWidth = 10;
-	self->xTpg.Config.SolidColorEnable = 0;
-	self->xTpg.Config.RampEnable = 1;
-	self->xTpg.Config.ColorBarEnable = 0;
-	self->xTpg.Config.DisplayPortEnable = 0;
-	self->xTpg.Config.ColorSweepEnable = 0;
-	self->xTpg.Config.ZoneplateEnable = 0;
-	self->xTpg.Config.ForegroundEnable = 0;
-	self->xTpg.IsReady = XIL_COMPONENT_IS_READY;
-	pr_info("xTpg = %p\n", (void*)self->xTpg.Config.BaseAddress);
-
-	for(i = 0;i < 5;i++) {
-		nIsIdle = XAximm_test0_IsIdle(&self->xaximm_test0);
-		if(nIsIdle)
-			break;
-		msleep(100);
-	}
-	if(! nIsIdle) {
-		pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
-	}
-
-	for(i = 0;i < 5;i++) {
-		nIsIdle = XAximm_test1_IsIdle(&self->xaximm_test1);
-		if(nIsIdle)
-			break;
-		msleep(100);
-	}
-	if(! nIsIdle) {
-		pr_err("unexpected, XAximm_test1_IsIdle()=%u\n", nIsIdle);
-	}
-
-	for(i = 0;i < 5;i++) {
-		nIsIdle = XZ_frmbuf_writer_IsIdle(&self->xFrmBufWr);
-		if(nIsIdle)
-			break;
-		msleep(100);
-	}
-	if(! nIsIdle) {
-		pr_err("nIsIdle=%u\n", nIsIdle);
-	}
-
-	for(i = 0;i < 5;i++) {
-		nIsIdle = XV_tpg_IsIdle(&self->xTpg);
-		if(nIsIdle)
-			break;
-		msleep(100);
-	}
-	if(! nIsIdle) {
-		pr_err("unexpected, XV_tpg_IsIdle()=%u\n", nIsIdle);
-	}
-
-	return 0;
-}
-
-static int setup_e381(struct qvio_device* self) {
-	int err;
-	struct pci_dev *pdev = self->pci_dev;
-	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
-	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
-	XAximm_test0* xaximm_test2_1 = &self->xaximm_test2_1;
-	int i;
-	u32 nIsIdle;
-	u32 value;
-	int reset_mask;
-
-#if 1
-	pr_info("reset all IPs...\n");
-	reset_mask = 0x07; // [aximm_test2_1, aximm_test3, aximm_test2]
-	value = *(u32*)((u8*)self->zzlab_env + 0x24);
-	*(u32*)((u8*)self->zzlab_env + 0x24) = value & ~reset_mask;
-	msleep(100);
-	*(u32*)((u8*)self->zzlab_env + 0x24) = value | reset_mask;
-#endif
-
-	xaximm_test2->Control_BaseAddress = (u64)self->bar[0] + 0x10000;
-	xaximm_test2->IsReady = XIL_COMPONENT_IS_READY;
-	pr_info("xaximm_test2 = %p\n", (void*)xaximm_test2->Control_BaseAddress);
-
-	xaximm_test3->Control_BaseAddress = (u64)self->bar[0] + 0x20000;
-	xaximm_test3->IsReady = XIL_COMPONENT_IS_READY;
-	pr_info("xaximm_test3 = %p\n", (void*)xaximm_test3->Control_BaseAddress);
-
-	xaximm_test2_1->Control_BaseAddress = (u64)self->bar[0] + 0x30000;
-	xaximm_test2_1->IsReady = XIL_COMPONENT_IS_READY;
-	pr_info("xaximm_test2_1 = %p\n", (void*)xaximm_test2_1->Control_BaseAddress);
-
-	for(i = 0;i < 5;i++) {
-		nIsIdle = XAximm_test0_IsIdle(xaximm_test2);
-		if(nIsIdle)
-			break;
-		msleep(100);
-	}
-	if(! nIsIdle) {
-		pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
-	}
-
-	for(i = 0;i < 5;i++) {
-		nIsIdle = XAximm_test0_IsIdle(xaximm_test3);
-		if(nIsIdle)
-			break;
-		msleep(100);
-	}
-	if(! nIsIdle) {
-		pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
-	}
-
-	for(i = 0;i < 5;i++) {
-		nIsIdle = XAximm_test0_IsIdle(xaximm_test2_1);
-		if(nIsIdle)
-			break;
-		msleep(100);
-	}
-	if(! nIsIdle) {
-		pr_err("unexpected, XAximm_test0_IsIdle()=%u\n", nIsIdle);
-	}
-
-	return 0;
-}
-
-static int setup_e382(struct qvio_device* self) {
-	int err;
-	struct pci_dev *pdev = self->pci_dev;
-	u32* xdma_irq_block;
-	u32 xdma_reg;
-	u32* xdma_h2c_channel;
-	u32* xdma_c2h_channel;
-
-	xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
-	xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
-	xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
-
-	// IRQ Block User Interrupt Enable Mask
-	xdma_irq_block[0x04 >> 2] = 0x0F; // Enable usr_irq_req[3:0]
-
-	// IRQ Block User Vector Number
-	xdma_reg = xdma_irq_block[0x80 >> 2];
-	xdma_reg = (xdma_reg & ~(0x1F << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
-	xdma_reg = (xdma_reg & ~(0x1F << 8)) | (1 << 8); // Map usr_irq_req[1] to MSI-X Vector 1
-	xdma_reg = (xdma_reg & ~(0x1F << 16)) | (2 << 16); // Map usr_irq_req[2] to MSI-X Vector 2
-	xdma_reg = (xdma_reg & ~(0x1F << 24)) | (3 << 24); // Map usr_irq_req[3] to MSI-X Vector 3
-	xdma_irq_block[0x80 >> 2] = xdma_reg;
-
-	// IRQ Block Channel Interrupt Enable Mask
-	xdma_irq_block[0x10 >> 2] = 0x03; // Enable engine_int_req[1:0]
-	xdma_irq_block[0x18 >> 2] = 0x03; // W1C engine_int_req[1:0]
-
-	// IRQ Block Channel Vector Number
-	xdma_reg = xdma_irq_block[0xA0 >> 2];
-	xdma_reg = (xdma_reg & ~(0x1F << 0)) | (0 << 0); // Map engine_int_req[0] to MSI-X Vector 0
-	xdma_reg = (xdma_reg & ~(0x1F << 8)) | (1 << 8); // Map engine_int_req[1] to MSI-X Vector 1
-	xdma_irq_block[0xA0 >> 2] = xdma_reg;
-
-	xdma_h2c_channel[0x90 >> 2] = BIT(1); // im_descriptor_stopped
-	xdma_c2h_channel[0x90 >> 2] = BIT(1); // im_descriptor_stopped
-
-	return 0;
-}
-#endif
 
 static int __pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
 	int err = 0;
@@ -1605,14 +1427,22 @@ int qvio_pci_device_register(void) {
 		goto err1;
 	}
 
+	err = qvio_qdma_rd_register();
+	if(err) {
+		pr_err("qvio_qdma_rd_register() failed\n");
+		goto err2;
+	}
+
 	err = pci_register_driver(&pci_driver); // will trigger pci_probe
 	if(err) {
 		pr_err("pci_register_driver() failed\n");
-		goto err2;
+		goto err3;
 	}
 
 	return err;
 
+err3:
+	qvio_qdma_rd_unregister();
 err2:
 	qvio_qdma_wr_unregister();
 err1:
@@ -1625,6 +1455,7 @@ void qvio_pci_device_unregister(void) {
 	pr_info("\n");
 
 	pci_unregister_driver(&pci_driver);
+	qvio_qdma_rd_unregister();
 	qvio_qdma_wr_unregister();
 	qvio_zdev_unregister();
 }
@@ -1655,8 +1486,17 @@ struct qvio_pci_device* qvio_pci_device_new(void) {
 		goto err2;
 	}
 
+	self->qdma_rd = qvio_qdma_rd_new();
+	if(! self->qdma_rd) {
+		pr_err("qvio_qdma_rd_new() failed\n");
+		err = -ENOMEM;
+		goto err3;
+	}
+
 	return self;
 
+err3:
+	qvio_qdma_wr_put(self->qdma_wr);
 err2:
 	qvio_zdev_put(self->zdev);
 err1:
@@ -1678,6 +1518,7 @@ static void __free(struct kref *ref)
 
 	// pr_info("\n");
 
+	qvio_qdma_rd_put(self->qdma_rd);
 	qvio_qdma_wr_put(self->qdma_wr);
 	qvio_zdev_put(self->zdev);
 	kfree(self);
@@ -1692,15 +1533,13 @@ static int device_probe(struct qvio_pci_device* self) {
 	int err;
 
 	switch(self->device_id & 0xFFFF) {
-#if 0
 	case 0xE382:
-		err = probe_e382(self);
+		err = device_e382_probe(self);
 		if(err) {
-			pr_err("probe_e382() failed, err=%d\n", err);
+			pr_err("device_e382_probe() failed, err=%d\n", err);
 			goto err0;
 		}
 		break;
-#endif
 
 	case 0x7024:
 		err = device_7024_probe(self);
@@ -1727,11 +1566,9 @@ static void device_remove(struct qvio_pci_device* self) {
 	int err;
 
 	switch(self->device_id & 0xFFFF) {
-#if 0
 	case 0xE382:
 		device_e382_remove(self);
 		break;
-#endif
 
 	case 0x7024:
 		device_7024_remove(self);
@@ -1774,8 +1611,20 @@ static int device_7024_probe(struct qvio_pci_device* self) {
 		goto err1;
 	}
 
+	self->qdma_rd->dev = self->dev;
+	self->qdma_rd->device_id = self->device_id;
+	self->qdma_rd->reg_zdev = (void __iomem *)((u64)self->bar[0] + 0x00000);
+	self->qdma_rd->reg = (void __iomem *)((u64)self->bar[0] + 0x11000);
+	err = qvio_qdma_rd_probe(self->qdma_rd);
+	if(err) {
+		pr_err("qvio_qdma_wr_probe() failed, err=%d\n", err);
+		goto err2;
+	}
+
 	return 0;
 
+err2:
+	qvio_qdma_wr_remove(self->qdma_wr);
 err1:
 	qvio_zdev_remove(self->zdev);
 err0:
@@ -1783,6 +1632,7 @@ err0:
 }
 
 static void device_7024_remove(struct qvio_pci_device* self) {
+	qvio_qdma_rd_remove(self->qdma_rd);
 	qvio_qdma_wr_remove(self->qdma_wr);
 	qvio_zdev_remove(self->zdev);
 }
@@ -1795,21 +1645,22 @@ static int device_7024_irq_setup(struct qvio_pci_device* self, struct pci_dev* p
 	uintptr_t reg_intr;
 	u32 vector;
 	irqreturn_t (*irq_handler_map[])(int irq, void *dev_id) = {
-		qdma_wr_irq_handler,
-		__irq_handler,
+		qvio_qdma_wr_irq_handler,
+		qvio_qdma_rd_irq_handler,
 	};
 	const char* irq_handler_name[] = {
 		"qdma_wr",
-		"noop"
+		"qdma_rd",
 	};
 	void* irq_handler_dev[] = {
 		self->qdma_wr,
-		self
+		self->qdma_rd,
 	};
 
 	if(self->msi_enabled) {
 		irq_count = pci_msi_vec_count(pdev);
-		pr_info("irq_count=%d\n", irq_count);
+
+#if 0 // USE_MULTI_IRQS
 		if(irq_count < 2) {
 			pr_err("irq_count=%d", irq_count);
 			err = -EINVAL;
@@ -1839,6 +1690,37 @@ static int device_7024_irq_setup(struct qvio_pci_device* self, struct pci_dev* p
 		value = (value & ~(0xFF << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
 		value = (value & ~(0xFF << 8)) | (1 << 8); // Map usr_irq_req[1] to MSI-X Vector 1
 		io_write_reg(reg_intr, 0x00, value);
+#else
+		if(irq_count < 1) {
+			pr_err("irq_count=%d", irq_count);
+			err = -EINVAL;
+			goto err0;
+		}
+
+		i = 0;
+		vector = pci_irq_vector(pdev, i);
+		if(vector == -EINVAL) {
+			err = -EINVAL;
+			pr_err("pci_irq_vector() failed\n");
+			goto err0;
+		}
+
+		pr_info("request_irq(%d, \"%s\", %p)\n", vector, DRV_MODULE_NAME, self);
+		err = request_irq(vector, device_7024_irq_handler, 0, DRV_MODULE_NAME, self);
+		if(err) {
+			pr_err("%d: request_irq(%u) failed, err=%d\n", i, vector, err);
+			goto err0;
+		}
+		self->irq_lines[i] = vector;
+
+		// IRQ Block User Vector Number
+		reg_intr = (uintptr_t)self->reg_intr;
+		value = io_read_reg(reg_intr, 0x00);
+		value = (value & ~(0xFF << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
+		value = (value & ~(0xFF << 8)) | (0 << 8); // Map usr_irq_req[1] to MSI-X Vector 0
+		io_write_reg(reg_intr, 0x00, value);
+#endif
+
 	}
 
 	return 0;
@@ -1851,13 +1733,82 @@ static void device_7024_free_irqs(struct qvio_pci_device* self) {
 	int i;
 	void* irq_handler_dev[] = {
 		self->qdma_wr,
-		self
+		self->qdma_rd
 	};
 
+#if 0 // USE_MULTI_IRQS
 	for(i = 0;i < 2;i++) {
 		if(self->irq_lines[i]) {
 			pr_info("free_irq(%d, %p)\n", self->irq_lines[i], irq_handler_dev[i]);
 			free_irq(self->irq_lines[i], irq_handler_dev[i]);
+			self->irq_lines[i] = 0;
 		}
 	}
+#else
+	i = 0;
+	if(self->irq_lines[i]) {
+		pr_info("free_irq(%d, %p)\n", self->irq_lines[i], self);
+		free_irq(self->irq_lines[i], self);
+		self->irq_lines[i] = 0;
+	}
+#endif
+}
+
+static irqreturn_t device_7024_irq_handler(int irq, void *dev_id) {
+	struct qvio_pci_device* self = dev_id;
+	irqreturn_t ret;
+
+	ret = qvio_qdma_wr_irq_handler(irq, self->qdma_wr);
+	if(ret == IRQ_NONE) {
+		ret = qvio_qdma_rd_irq_handler(irq, self->qdma_rd);
+	}
+
+	return ret;
+}
+
+static int device_e382_probe(struct qvio_pci_device* self) {
+	u32* xdma_irq_block;
+	u32 xdma_reg;
+	u32* xdma_h2c_channel;
+	u32* xdma_c2h_channel;
+
+	xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+	xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
+	xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
+
+	// IRQ Block User Interrupt Enable Mask
+	xdma_irq_block[0x04 >> 2] = 0x0F; // Enable usr_irq_req[3:0]
+
+	// IRQ Block User Vector Number
+	xdma_reg = xdma_irq_block[0x80 >> 2];
+	xdma_reg = (xdma_reg & ~(0x1F << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
+	xdma_reg = (xdma_reg & ~(0x1F << 8)) | (1 << 8); // Map usr_irq_req[1] to MSI-X Vector 1
+	xdma_reg = (xdma_reg & ~(0x1F << 16)) | (2 << 16); // Map usr_irq_req[2] to MSI-X Vector 2
+	xdma_reg = (xdma_reg & ~(0x1F << 24)) | (3 << 24); // Map usr_irq_req[3] to MSI-X Vector 3
+	xdma_irq_block[0x80 >> 2] = xdma_reg;
+
+	// IRQ Block Channel Interrupt Enable Mask
+	xdma_irq_block[0x10 >> 2] = 0x03; // Enable engine_int_req[1:0]
+	xdma_irq_block[0x18 >> 2] = 0x03; // W1C engine_int_req[1:0]
+
+	// IRQ Block Channel Vector Number
+	xdma_reg = xdma_irq_block[0xA0 >> 2];
+	xdma_reg = (xdma_reg & ~(0x1F << 0)) | (0 << 0); // Map engine_int_req[0] to MSI-X Vector 0
+	xdma_reg = (xdma_reg & ~(0x1F << 8)) | (1 << 8); // Map engine_int_req[1] to MSI-X Vector 1
+	xdma_irq_block[0xA0 >> 2] = xdma_reg;
+
+	xdma_h2c_channel[0x90 >> 2] = BIT(1); // im_descriptor_stopped
+	xdma_c2h_channel[0x90 >> 2] = BIT(1); // im_descriptor_stopped
+}
+
+static void device_e382_remove(struct qvio_pci_device* self) {
+	// TODO:
+}
+
+static int device_e382_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev) {
+	// TODO:
+}
+
+static void device_e382_free_irqs(struct qvio_pci_device* self) {
+	// TODO:
 }

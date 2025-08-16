@@ -583,38 +583,6 @@ static long __file_ioctl_streamoff(struct qvio_video_queue* self, struct file * 
 #endif
 		break;
 
-	case QVIO_WORK_MODE_QDMA_RD:
-		qdma_rd = (uintptr_t)self->qdma_rd;
-		io_write_reg(qdma_rd, 0x04, 0x00); // GIE
-		io_write_reg(qdma_rd, 0x08, 0x00); // IER (ap_done)
-
-		for(i = 0;i < 5;i++) {
-			value = io_read_reg(qdma_rd, 0x00);
-			if(value & 0x04) // ap_idle
-				break;
-
-			pr_info("qdma_rd[0x00]=0x%x\n", value);
-			msleep(100);
-		}
-
-		switch(pdev->device) {
-		case 0x7024:
-			reset_mask = 0x02; // [x, qdma_rd, x]
-			break;
-
-		default:
-			reset_mask = 0;
-			pr_err("unexpected value, pdev->device=0x%04X\n", (int)pdev->device);
-			break;
-		}
-
-		pr_info("reset qdma_rd...\n");
-		value = io_read_reg(zzlab_env, 0x10);
-		io_write_reg(zzlab_env, 0x10, value & ~reset_mask);
-		msleep(100);
-		io_write_reg(zzlab_env, 0x10, value | reset_mask);
-		break;
-
 	default:
 		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
 		ret = -EINVAL;
