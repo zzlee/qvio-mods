@@ -9,7 +9,7 @@
 #include "video_queue.h"
 #include "utils.h"
 
-static void __device_free(struct kref *ref);
+static void __free(struct kref *ref);
 static long __file_ioctl_s_fmt(struct qvio_video_queue* self, struct file * filp, unsigned long arg);
 static long __file_ioctl_g_fmt(struct qvio_video_queue* self, struct file * filp, unsigned long arg);
 static long __file_ioctl_req_bufs(struct qvio_video_queue* self, struct file * filp, unsigned long arg);
@@ -55,7 +55,7 @@ struct qvio_video_queue* qvio_video_queue_get(struct qvio_video_queue* self) {
 	return self;
 }
 
-static void __device_free(struct kref *ref) {
+static void __free(struct kref *ref) {
 	struct qvio_video_queue* self = container_of(ref, struct qvio_video_queue, ref);
 
 	// pr_info("\n");
@@ -65,7 +65,7 @@ static void __device_free(struct kref *ref) {
 
 void qvio_video_queue_put(struct qvio_video_queue* self) {
 	if (self)
-		kref_put(&self->ref, __device_free);
+		kref_put(&self->ref, __free);
 }
 
 __poll_t qvio_video_queue_file_poll(struct qvio_video_queue* self, struct file *filp, struct poll_table_struct *wait) {

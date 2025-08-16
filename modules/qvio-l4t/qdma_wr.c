@@ -13,7 +13,7 @@
 
 static struct qvio_cdev_class __cdev_class;
 
-static void __device_free(struct kref *ref);
+static void __free(struct kref *ref);
 static long __file_ioctl(struct file * filp, unsigned int cmd, unsigned long arg);
 static __poll_t __file_poll(struct file *filp, struct poll_table_struct *wait);
 static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* sgt, struct qvio_buffer* buf, struct qvio_buf_entry* buf_entry);
@@ -93,7 +93,7 @@ struct qvio_qdma_wr* qvio_qdma_wr_get(struct qvio_qdma_wr* self) {
 	return self;
 }
 
-static void __device_free(struct kref *ref) {
+static void __free(struct kref *ref) {
 	struct qvio_qdma_wr* self = container_of(ref, struct qvio_qdma_wr, ref);
 
 	// pr_info("\n");
@@ -104,7 +104,7 @@ static void __device_free(struct kref *ref) {
 
 void qvio_qdma_wr_put(struct qvio_qdma_wr* self) {
 	if (self)
-		kref_put(&self->ref, __device_free);
+		kref_put(&self->ref, __free);
 }
 
 int qvio_qdma_wr_probe(struct qvio_qdma_wr* self) {
@@ -148,7 +148,6 @@ err0:
 
 void qvio_qdma_wr_remove(struct qvio_qdma_wr* self) {
 	qvio_cdev_stop(&self->cdev, &__cdev_class);
-	qvio_video_queue_put(self->video_queue);
 	dma_pool_destroy(self->desc_pool);
 }
 
@@ -184,21 +183,21 @@ irqreturn_t qdma_wr_irq_handler(int irq, void *dev_id) {
 	u32 value;
 	struct qvio_buf_entry* next_entry;
 
-#if 0
-	pr_info("QDMA-WR, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
-	self->irq_counter++;
-#endif
-
 #if 1
 	value = io_read_reg(reg, 0x0C); // ISR (ap_done)
 	if(! (value & 0x01)) {
-		pr_warn("unexpected, value=%u\n", value);
+		// pr_warn("unexpected, value=%u\n", value);
 		return IRQ_NONE;
 	}
 
 	io_write_reg(reg, 0x0C, value & 0x01); // ap_done, TOW
 
 	if(value & 0x01) {
+#if 1
+		pr_info("QDMA-WR, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+		self->irq_counter++;
+#endif
+
 		err = qvio_video_queue_done(self->video_queue, &next_entry);
 		if(err) {
 			pr_err("qvio_video_queue_done() failed, err=%u\n", err);

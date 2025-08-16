@@ -79,12 +79,13 @@ static void __pci_reset_done(struct pci_dev *pdev);
 #elif KERNEL_VERSION(3, 16, 0) <= LINUX_VERSION_CODE
 static void __pci_reset_notify(struct pci_dev *pdev, bool prepare);
 #endif
-static void __device_free(struct kref *ref);
+static void __free(struct kref *ref);
 static int device_probe(struct qvio_pci_device* self);
 static void device_remove(struct qvio_pci_device* self);
 static int device_7024_probe(struct qvio_pci_device* self);
 static void device_7024_remove(struct qvio_pci_device* self);
 static int device_7024_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev);
+static void device_7024_free_irqs(struct qvio_pci_device* self);
 
 static const struct pci_device_id __pci_ids[] = {
 	{ PCI_DEVICE(0x12AB, 0xE380), },
@@ -1037,12 +1038,10 @@ static void disable_msi_msix(struct qvio_pci_device* self, struct pci_dev* pdev)
 }
 
 static void free_irqs(struct qvio_pci_device* self) {
-	int i;
-
-	for(i = 0;i < ARRAY_SIZE(self->irq_lines);i++) {
-		if(self->irq_lines[i]) {
-			free_irq(self->irq_lines[i], self);
-		}
+	switch(self->device_id & 0xFFFF) {
+	case 0x7024:
+		device_7024_free_irqs(self);
+		break;
 	}
 }
 
@@ -1089,7 +1088,7 @@ static int dma_blocks_alloc(struct qvio_pci_device* self) {
 			goto err0;
 		}
 
-		pr_info("dma_blocks[%d]: cpu_addr=%llx dma_handle=%llx", i,
+		pr_info("dma_blocks[%d]: cpu_addr=%llx dma_handle=%llx\n", i,
 			(u64)self->dma_blocks[i].cpu_addr, (u64)self->dma_blocks[i].dma_handle);
 	}
 
@@ -1600,14 +1599,22 @@ int qvio_pci_device_register(void) {
 		goto err0;
 	}
 
+	err = qvio_qdma_wr_register();
+	if(err) {
+		pr_err("qvio_qdma_wr_register() failed\n");
+		goto err1;
+	}
+
 	err = pci_register_driver(&pci_driver); // will trigger pci_probe
 	if(err) {
 		pr_err("pci_register_driver() failed\n");
-		goto err1;
+		goto err2;
 	}
 
 	return err;
 
+err2:
+	qvio_qdma_wr_unregister();
 err1:
 	qvio_zdev_unregister();
 err0:
@@ -1618,6 +1625,7 @@ void qvio_pci_device_unregister(void) {
 	pr_info("\n");
 
 	pci_unregister_driver(&pci_driver);
+	qvio_qdma_wr_unregister();
 	qvio_zdev_unregister();
 }
 
@@ -1644,11 +1652,13 @@ struct qvio_pci_device* qvio_pci_device_new(void) {
 	if(! self->qdma_wr) {
 		pr_err("qvio_qdma_wr_new() failed\n");
 		err = -ENOMEM;
-		goto err1;
+		goto err2;
 	}
 
 	return self;
 
+err2:
+	qvio_zdev_put(self->zdev);
 err1:
 	kfree(self);
 err0:
@@ -1662,7 +1672,7 @@ struct qvio_pci_device* qvio_pci_device_get(struct qvio_pci_device* self) {
 	return self;
 }
 
-static void __device_free(struct kref *ref)
+static void __free(struct kref *ref)
 {
 	struct qvio_pci_device* self = container_of(ref, struct qvio_pci_device, ref);
 
@@ -1670,13 +1680,12 @@ static void __device_free(struct kref *ref)
 
 	qvio_qdma_wr_put(self->qdma_wr);
 	qvio_zdev_put(self->zdev);
-
 	kfree(self);
 }
 
 void qvio_pci_device_put(struct qvio_pci_device* self) {
 	if (self)
-		kref_put(&self->ref, __device_free);
+		kref_put(&self->ref, __free);
 }
 
 static int device_probe(struct qvio_pci_device* self) {
@@ -1800,18 +1809,12 @@ static int device_7024_irq_setup(struct qvio_pci_device* self, struct pci_dev* p
 
 	if(self->msi_enabled) {
 		irq_count = pci_msi_vec_count(pdev);
+		pr_info("irq_count=%d\n", irq_count);
 		if(irq_count < 2) {
 			pr_err("irq_count=%d", irq_count);
 			err = -EINVAL;
 			goto err0;
 		}
-
-		// IRQ Block User Vector Number
-		reg_intr = (uintptr_t)self->reg_intr;
-		value = io_read_reg(reg_intr, 0x00);
-		value = (value & ~(0xFF << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
-		value = (value & ~(0xFF << 8)) | (1 << 8); // Map usr_irq_req[1] to MSI-X Vector 1
-		io_write_reg(reg_intr, 0x00, value);
 
 		for(i = 0;i < 2;i++) {
 			vector = pci_irq_vector(pdev, i);
@@ -1821,6 +1824,7 @@ static int device_7024_irq_setup(struct qvio_pci_device* self, struct pci_dev* p
 				goto err0;
 			}
 
+			pr_info("request_irq(%d, \"%s\", %p)\n", vector, irq_handler_name[i], irq_handler_dev[i]);
 			err = request_irq(vector, irq_handler_map[i], 0, irq_handler_name[i], irq_handler_dev[i]);
 			if(err) {
 				pr_err("%d: request_irq(%u) failed, err=%d\n", i, vector, err);
@@ -1828,10 +1832,32 @@ static int device_7024_irq_setup(struct qvio_pci_device* self, struct pci_dev* p
 			}
 			self->irq_lines[i] = vector;
 		}
+
+		// IRQ Block User Vector Number
+		reg_intr = (uintptr_t)self->reg_intr;
+		value = io_read_reg(reg_intr, 0x00);
+		value = (value & ~(0xFF << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
+		value = (value & ~(0xFF << 8)) | (1 << 8); // Map usr_irq_req[1] to MSI-X Vector 1
+		io_write_reg(reg_intr, 0x00, value);
 	}
 
 	return 0;
 
 err0:
 	return err;
+}
+
+static void device_7024_free_irqs(struct qvio_pci_device* self) {
+	int i;
+	void* irq_handler_dev[] = {
+		self->qdma_wr,
+		self
+	};
+
+	for(i = 0;i < 2;i++) {
+		if(self->irq_lines[i]) {
+			pr_info("free_irq(%d, %p)\n", self->irq_lines[i], irq_handler_dev[i]);
+			free_irq(self->irq_lines[i], irq_handler_dev[i]);
+		}
+	}
 }
