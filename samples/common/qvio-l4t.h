@@ -214,7 +214,12 @@ struct qvio_req_bufs {
 #define QVIO_IOC_DQBUF			_IOWR(QVIO_IOC_MAGIC, 0x6, struct qvio_buffer)
 #define QVIO_IOC_STREAMON		_IO  (QVIO_IOC_MAGIC, 0x7)
 #define QVIO_IOC_STREAMOFF		_IO  (QVIO_IOC_MAGIC, 0x8)
-#define QVIO_IOC_S_WORK_MODE	_IOW (QVIO_IOC_MAGIC, 0x9, int)
-#define QVIO_IOC_G_WORK_MODE	_IOR (QVIO_IOC_MAGIC, 0x9, int)
+// #define QVIO_IOC_S_WORK_MODE	_IOW (QVIO_IOC_MAGIC, 0x9, int)
+// #define QVIO_IOC_G_WORK_MODE	_IOR (QVIO_IOC_MAGIC, 0x9, int)
+#define QVIO_IOC_TPG_S_FMT		_IOW (QVIO_IOC_MAGIC, 0xA, struct qvio_format)
+#define QVIO_IOC_TPG_G_FMT		_IOR (QVIO_IOC_MAGIC, 0xA, struct qvio_format)
+#define QVIO_IOC_TPG_STREAMON	_IO  (QVIO_IOC_MAGIC, 0xB)
+#define QVIO_IOC_TPG_STREAMOFF	_IO  (QVIO_IOC_MAGIC, 0xC)
+#define QVIO_IOC_TPG_GEN		_IO  (QVIO_IOC_MAGIC, 0xD)
 
 #endif /* _UAPI_LINUX_QVIO_L4T_H */

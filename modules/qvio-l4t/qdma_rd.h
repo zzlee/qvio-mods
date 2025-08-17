@@ -5,6 +5,7 @@
 #include <linux/irqreturn.h>
 
 #include "cdev.h"
+#include "zdev.h"
 #include "video_queue.h"
 
 struct qvio_qdma_rd {
@@ -14,7 +15,7 @@ struct qvio_qdma_rd {
 	uint32_t device_id;
 	struct qvio_cdev cdev;
 
-	void __iomem * reg_zdev;
+	struct qvio_zdev* zdev;
 	void __iomem * reg;
 	struct qvio_video_queue* video_queue;
 	int irq_counter;
@@ -34,6 +35,6 @@ void qvio_qdma_rd_put(struct qvio_qdma_rd* self);
 int qvio_qdma_rd_probe(struct qvio_qdma_rd* self);
 void qvio_qdma_rd_remove(struct qvio_qdma_rd* self);
 
-irqreturn_t qdma_rd_irq_handler(int irq, void *dev_id);
+irqreturn_t qvio_qdma_rd_irq_handler(int irq, void *dev_id);
 
 #endif // __QVIO_QDMA_RD_H__

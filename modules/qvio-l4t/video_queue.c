@@ -2,7 +2,6 @@
 
 #include <linux/version.h>
 #include <linux/slab.h>
-#include <linux/io.h>
 #include <linux/fs.h>
 #include <linux/poll.h>
 
@@ -59,6 +58,8 @@ static void __free(struct kref *ref) {
 	struct qvio_video_queue* self = container_of(ref, struct qvio_video_queue, ref);
 
 	// pr_info("\n");
+
+	if(self->mmap_buffer) vfree(self->mmap_buffer);
 
 	kfree(self);
 }
@@ -181,11 +182,10 @@ err0:
 }
 
 static long __file_ioctl_req_bufs(struct qvio_video_queue* self, struct file * filp, unsigned long arg) {
+	int err;
 	long ret;
 	struct qvio_req_bufs args;
-	ssize_t buf_size;
 	int i;
-	__u32 offset;
 
 	ret = copy_from_user(&args, (void __user *)arg, sizeof(args));
 	if (ret != 0) {
@@ -214,43 +214,32 @@ static long __file_ioctl_req_bufs(struct qvio_video_queue* self, struct file * f
 		memcpy(self->buffers[i].stride, args.stride, ARRAY_SIZE(args.stride));
 	}
 
-	buf_size = utils_calc_buf_size(&self->format, args.offset, args.stride);
-	if(buf_size <= 0) {
-		pr_err("unexpected value, buf_size=%ld\n", buf_size);
-		ret = buf_size;
+	err = utils_calc_buf_size(&self->format, args.offset, args.stride, &self->buffer_size);
+	if(err <= 0) {
+		pr_err("utils_calc_buf_size() failed, err=%d\n", err);
+		ret = err;
 		goto err0;
 	}
-	pr_info("buf_size=%lu\n", buf_size);
-
-	self->buffer_size = buf_size;
+	pr_info("buffer_size=%lu\n", self->buffer_size);
 
 	switch(args.buf_type) {
 	case QVIO_BUF_TYPE_MMAP:
 		if(self->mmap_buffer) vfree(self->mmap_buffer);
 
-		self->mmap_buffer_size = (size_t)(buf_size * args.count);
+		self->mmap_buffer_size = (size_t)(self->buffer_size * args.count);
 		self->mmap_buffer = vmalloc(self->mmap_buffer_size);
 		if(! self->mmap_buffer) {
 			pr_err("vmalloc() failed\n");
 			goto err0;
 		}
 
-		offset = 0;
-		for(i = 0;i < args.count;i++) {
-			self->buffers[i].u.offset = offset;
-
-			offset += buf_size;
-		}
-
 		break;
 
-#if 0
 	case QVIO_BUF_TYPE_DMABUF:
 		break;
 
 	case QVIO_BUF_TYPE_USERPTR:
 		break;
-#endif
 
 	default:
 		pr_err("unexpected value, args.buf_type=%d\n", (int)args.buf_type);
@@ -378,123 +367,7 @@ static long __file_ioctl_streamon(struct qvio_video_queue* self, struct file * f
 	long ret;
 	int err;
 	struct qvio_buf_entry* buf_entry;
-#if 0
-	struct qvio_device* self = filp->private_data;
-	struct pci_dev* pdev = self->pci_dev;
-	uintptr_t zzlab_env = self->zzlab_env;
-	XAximm_test0* xaximm_test0 = &self->xaximm_test0;
-	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
-	XZ_frmbuf_writer* xFrmBufWr = &self->xFrmBufWr;
-	XV_tpg* xTpg = &self->xTpg;
-	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
-	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
-	XAximm_test0* xaximm_test2_1 = &self->xaximm_test2_1;
-	u32* xdma_irq_block;
-	u32* xdma_h2c_channel;
-	u32* xdma_c2h_channel;
-	uintptr_t qdma_wr;
-	uintptr_t qdma_rd;
-	long ret;
-	struct qvio_buf_entry* buf_entry;
-	u32 value;
-	u32 nIsIdle;
-	int i;
-	int reset_mask;
 
-	if(self->state == QVIO_VIDEO_QUEUE_STATE_START) {
-		pr_err("unexpected value, self->state=%d\n", self->state);
-		ret = -EINVAL;
-		goto err0;
-	}
-
-	switch(self->work_mode) {
-	case QVIO_WORK_MODE_XDMA_H2C:
-		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
-		xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
-
-		pr_info("IRQ Block Identifier: 0x%08X\n", xdma_irq_block[0x00 >> 2]);
-		pr_info("H2C Channel Identifier: 0x%08X\n", xdma_h2c_channel[0x00 >> 2]);
-		pr_info("H2C Channel Status: 0x%X\n", xdma_h2c_channel[0x40 >> 2]);
-		pr_info("H2C Channel Completed Descriptor Count: %d\n", xdma_h2c_channel[0x48 >> 2]);
-
-#if 1
-		xdma_irq_block[0x14 >> 2] = 0x01; // W1S engine_int_req[0:0]
-		xdma_h2c_channel[0x04 >> 2] = 0;
-#endif
-		break;
-
-	case QVIO_WORK_MODE_XDMA_C2H:
-		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
-		xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
-
-		pr_info("IRQ Block Identifier: 0x%08X\n", xdma_irq_block[0x00 >> 2]);
-		pr_info("C2H Channel Identifier: 0x%08X\n", xdma_c2h_channel[0x00 >> 2]);
-		pr_info("C2H Channel Status: 0x%X\n", xdma_c2h_channel[0x40 >> 2]);
-		pr_info("C2H Channel Completed Descriptor Count: %d\n", xdma_c2h_channel[0x48 >> 2]);
-
-#if 1
-		xdma_irq_block[0x14 >> 2] = 0x02; // W1S engine_int_req[1:1]
-		xdma_c2h_channel[0x04 >> 2] = 0;
-#endif
-		break;
-
-	case QVIO_WORK_MODE_QDMA_WR:
-		switch(pdev->device) {
-		case 0x7024:
-			reset_mask = 0x01; // [x, x, qdma_wr]
-			break;
-
-		default:
-			reset_mask = 0;
-			pr_err("unexpected value, pdev->device=0x%04X\n", (int)pdev->device);
-			break;
-		}
-
-		pr_info("reset qdma_wr...\n");
-		value = io_read_reg(zzlab_env, 0x10);
-		io_write_reg(zzlab_env, 0x10, value & ~reset_mask);
-		msleep(100);
-		io_write_reg(zzlab_env, 0x10, value | reset_mask);
-
-		qdma_wr = (uintptr_t)self->qdma_wr;
-		pr_info("qdma_wr[0x00]=0x%x\n", io_read_reg(qdma_wr, 0x00));
-		io_write_reg(qdma_wr, 0x00, 0x00);
-		io_write_reg(qdma_wr, 0x04, 0x01); // GIE
-		io_write_reg(qdma_wr, 0x08, 0x01); // IER (ap_done)
-		break;
-
-	case QVIO_WORK_MODE_QDMA_RD:
-		switch(pdev->device) {
-		case 0x7024:
-			reset_mask = 0x02; // [x, qdma_rd, x]
-			break;
-
-		default:
-			reset_mask = 0;
-			pr_err("unexpected value, pdev->device=0x%04X\n", (int)pdev->device);
-			break;
-		}
-
-		pr_info("reset qdma_rd...\n");
-		value = io_read_reg(zzlab_env, 0x10);
-		io_write_reg(zzlab_env, 0x10, value & ~reset_mask);
-		msleep(100);
-		io_write_reg(zzlab_env, 0x10, value | reset_mask);
-
-		qdma_rd = (uintptr_t)self->qdma_rd;
-		pr_info("qdma_rd[0x00]=0x%x\n", io_read_reg(qdma_rd, 0x00));
-		io_write_reg(qdma_rd, 0x00, 0x00);
-		io_write_reg(qdma_rd, 0x04, 0x01); // GIE
-		io_write_reg(qdma_rd, 0x08, 0x01); // IER (ap_done)
-		break;
-
-	default:
-		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
-		ret = -EINVAL;
-		goto err0;
-		break;
-	}
-#endif
 	if(self->state == QVIO_VIDEO_QUEUE_STATE_START) {
 		pr_err("unexpected value, self->state=%d\n", self->state);
 		ret = -EINVAL;
@@ -529,67 +402,7 @@ static long __file_ioctl_streamoff(struct qvio_video_queue* self, struct file * 
 	int err;
 	unsigned long flags;
 	struct qvio_buf_entry* buf_entry;
-#if 0
-	struct qvio_device* self = filp->private_data;
-	struct pci_dev* pdev = self->pci_dev;
-	uintptr_t zzlab_env = (uintptr_t)self->zzlab_env;
-	XAximm_test0* xaximm_test0 = &self->xaximm_test0;
-	XAximm_test1* xaximm_test1 = &self->xaximm_test1;
-	XZ_frmbuf_writer* xFrmBufWr = &self->xFrmBufWr;
-	XV_tpg* xTpg = &self->xTpg;
-	XAximm_test0* xaximm_test2 = &self->xaximm_test2;
-	XAximm_test0* xaximm_test3 = &self->xaximm_test3;
-	XAximm_test0* xaximm_test2_1 = &self->xaximm_test2_1;
-	uintptr_t qdma_wr;
-	uintptr_t qdma_rd;
-	u32* xdma_irq_block;
-	u32* xdma_h2c_channel;
-	u32* xdma_c2h_channel;
-	u32 value;
-	u32 nIsIdle;
-	int i;
-	unsigned long flags;
-	struct qvio_buf_entry* buf_entry;
-	int reset_mask;
 
-	switch(self->work_mode) {
-	case QVIO_WORK_MODE_XDMA_H2C:
-		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
-		xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
-
-		pr_info("IRQ Block Identifier: 0x%08X\n", xdma_irq_block[0x00 >> 2]);
-		pr_info("H2C Channel Identifier: 0x%08X\n", xdma_h2c_channel[0x00 >> 2]);
-		pr_info("H2C Channel Status: 0x%X\n", xdma_h2c_channel[0x40 >> 2]);
-		pr_info("H2C Channel Completed Descriptor Count: %d\n", xdma_h2c_channel[0x48 >> 2]);
-
-#if 1
-		xdma_irq_block[0x18 >> 2] = 0x01; // W1C engine_int_req[0:0]
-		xdma_h2c_channel[0x04 >> 2] = 0;
-#endif
-		break;
-
-	case QVIO_WORK_MODE_XDMA_C2H:
-		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
-		xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
-
-		pr_info("IRQ Block Identifier: 0x%08X\n", xdma_irq_block[0x00 >> 2]);
-		pr_info("C2H Channel Identifier: 0x%08X\n", xdma_c2h_channel[0x00 >> 2]);
-		pr_info("C2H Channel Status: 0x%X\n", xdma_c2h_channel[0x40 >> 2]);
-		pr_info("C2H Channel Completed Descriptor Count: %d\n", xdma_c2h_channel[0x48 >> 2]);
-
-#if 1
-		xdma_irq_block[0x18 >> 2] = 0x02; // W1C engine_int_req[1:1]
-		xdma_c2h_channel[0x04 >> 2] = 0;
-#endif
-		break;
-
-	default:
-		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
-		ret = -EINVAL;
-		goto err0;
-		break;
-	}
-#endif
 	if(self->state == QVIO_VIDEO_QUEUE_STATE_READY) {
 		pr_err("unexpected value, self->state=%d\n", self->state);
 		ret = -EINVAL;
@@ -636,7 +449,6 @@ err0:
 static long __file_ioctl_qbuf_userptr(struct qvio_video_queue* self, struct file * filp, struct qvio_buffer* buf) {
 	long ret;
 	int err;
-	ssize_t buf_size;
 	unsigned long start;
 	unsigned long length;
 	unsigned long first, last;
@@ -649,16 +461,7 @@ static long __file_ioctl_qbuf_userptr(struct qvio_video_queue* self, struct file
 	struct qvio_buf_entry* buf_entry;
 
 	start = buf->u.userptr;
-
-	buf_size = utils_calc_buf_size(&self->format, buf->offset, buf->stride);
-	if(buf_size <= 0) {
-		pr_err("unexpected value, buf_size=%ld\n", buf_size);
-		ret = buf_size;
-		goto err0;
-	}
-	// pr_info("buf_size=%lu\n", buf_size);
-
-	length = buf_size;
+	length = self->buffer_size;
 	first = start >> PAGE_SHIFT;
 	last = (start + length - 1) >> PAGE_SHIFT;
 	nr = last - first + 1;
@@ -830,7 +633,6 @@ err0:
 static long __file_ioctl_qbuf_mmap(struct qvio_video_queue* self, struct file * filp, struct qvio_buffer* buf) {
 	long ret;
 	int err;
-	ssize_t buf_size;
 	void* vaddr;
 	unsigned long nr_pages;
 	struct page **pages;
@@ -839,17 +641,10 @@ static long __file_ioctl_qbuf_mmap(struct qvio_video_queue* self, struct file * 
 	enum dma_data_direction dma_dir = buf->buf_dir;
 	struct qvio_buf_entry* buf_entry;
 
-	buf_size = utils_calc_buf_size(&self->format, buf->offset, buf->stride);
-	if(buf_size <= 0) {
-		pr_err("unexpected value, buf_size=%ld\n", buf_size);
-		ret = buf_size;
-		goto err0;
-	}
-
 	vaddr = (uint8_t*)self->mmap_buffer + buf->u.offset;
 	// pr_info("vaddr=%llX\n", (int64_t)vaddr);
 
-	nr_pages = (buf_size + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	nr_pages = (self->buffer_size + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	// pr_info("nr_pages=%lu\n", nr_pages);
 
 	pages = kmalloc(sizeof(struct page *) * nr_pages, GFP_KERNEL);
@@ -875,7 +670,7 @@ static long __file_ioctl_qbuf_mmap(struct qvio_video_queue* self, struct file * 
 		goto err1;
 	}
 
-	err = sg_alloc_table_from_pages(sgt, pages, nr_pages, 0, buf_size, GFP_KERNEL);
+	err = sg_alloc_table_from_pages(sgt, pages, nr_pages, 0, self->buffer_size, GFP_KERNEL);
 	if (err < 0) {
 		pr_err("sg_alloc_table_from_pages() failed, err=%d\n", err);
 		ret = err;

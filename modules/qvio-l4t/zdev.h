@@ -2,6 +2,7 @@
 #define __QVIO_ZDEV_H__
 
 #include <linux/platform_device.h>
+#include <linux/mutex.h>
 
 #include "cdev.h"
 
@@ -13,6 +14,7 @@ struct qvio_zdev {
 	struct qvio_cdev cdev;
 
 	void __iomem * reg;
+	struct mutex mutex_reg;
 };
 
 // register
@@ -33,5 +35,8 @@ ssize_t qvio_zdev_attr_ver_show(struct qvio_zdev* self, char *buf);
 ssize_t qvio_zdev_attr_ticks_show(struct qvio_zdev* self, char *buf);
 ssize_t qvio_zdev_attr_value0_show(struct qvio_zdev* self, char *buf);
 ssize_t qvio_zdev_attr_value0_store(struct qvio_zdev* self, const char *buf, size_t count);
+
+// ioctl
+int qvio_zdev_reset_mask(struct qvio_zdev* self, int reset_mask, unsigned int msecs);
 
 #endif // __QVIO_ZDEV_H__

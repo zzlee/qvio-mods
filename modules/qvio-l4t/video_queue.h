@@ -30,9 +30,12 @@ struct qvio_video_queue {
 	__u32 buffers_count;
 	struct qvio_buffer* buffers;
 	size_t buffer_size;
+
+	// for mmap
 	void* mmap_buffer;
 	size_t mmap_buffer_size;
 
+	// events
 	void* parent;
 	int (*buf_entry_from_sgt)(struct qvio_video_queue* self, struct sg_table* sgt, struct qvio_buffer* buf, struct qvio_buf_entry* buf_entry);
 	int (*start_buf_entry)(struct qvio_video_queue* self, struct qvio_buf_entry* buf_entry);

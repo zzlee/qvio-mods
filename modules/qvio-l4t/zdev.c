@@ -2,11 +2,12 @@
 
 #include <linux/version.h>
 #include <linux/slab.h>
-#include <linux/io.h>
 #include <linux/fs.h>
+#include <linux/delay.h>
 
 #include "zdev.h"
 #include "uapi/qvio-l4t.h"
+#include "utils.h"
 
 static struct qvio_cdev_class __cdev_class;
 
@@ -21,14 +22,6 @@ static const struct file_operations __fops = {
 	.llseek = noop_llseek,
 	.unlocked_ioctl = __file_ioctl,
 };
-
-static inline void io_write_reg(uintptr_t BaseAddress, int RegOffset, u32 Data) {
-    iowrite32(Data, (volatile void *)(BaseAddress + RegOffset));
-}
-
-static inline u32 io_read_reg(uintptr_t BaseAddress, int RegOffset) {
-    return ioread32((const volatile void *)(BaseAddress + RegOffset));
-}
 
 int qvio_zdev_register(void) {
 	int err;
@@ -64,6 +57,7 @@ struct qvio_zdev* qvio_zdev_new(void) {
 	}
 
 	kref_init(&self->ref);
+	mutex_init(&self->mutex_reg);
 
 	return self;
 
@@ -241,4 +235,28 @@ static long __file_ioctl_g_ticks(struct file * filp, unsigned long arg) {
 
 err0:
 	return ret;
+}
+
+int qvio_zdev_reset_mask(struct qvio_zdev* self, int reset_mask, unsigned int msecs) {
+	int err;
+	uintptr_t reg = (uintptr_t)self->reg;
+	u32 value;
+
+	err = mutex_lock_interruptible(&self->mutex_reg);
+	if(err < 0) {
+		pr_err("mutex_lock_interruptible() failed, err=%d\n", err);
+		goto err0;
+	}
+
+	value = io_read_reg(reg, 0x10);
+	io_write_reg(reg, 0x10, value & ~reset_mask);
+	msleep(msecs);
+	io_write_reg(reg, 0x10, value | reset_mask);
+
+	mutex_unlock(&self->mutex_reg);
+
+	return 0;
+
+err0:
+	return err;
 }

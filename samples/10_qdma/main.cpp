@@ -71,94 +71,103 @@ namespace __10_qdma__ {
 			// nFmt = fourcc('N', 'V', '1', '6');
 			nWidth = 4096;
 			nHeight = 2160;
-			nStride = 4096;
+			nStride = (nWidth + 31) / 32 * 32;
 			nBuffers = 4;
 			nTimes = nHeight;
-			// nBufferType = QVIO_BUF_TYPE_USERPTR;
-			nBufferType = QVIO_BUF_TYPE_DMABUF;
+			nBufferType = QVIO_BUF_TYPE_USERPTR;
+			// nBufferType = QVIO_BUF_TYPE_DMABUF;
 
 			switch(1) { case 1:
 				ZzUtils::Scoped ZZ_GUARD_NAME([&]() {
 					oFreeStack.Flush();
 				});
 
-				pSysBufs.resize(nBuffers);
-				for(int i = 0;i < pSysBufs.size();i++) {
-					int size;
+				switch(nBufferType) {
+				case QVIO_BUF_TYPE_USERPTR:
+					pSysBufs.resize(nBuffers);
+					for(int i = 0;i < pSysBufs.size();i++) {
+						int size;
+						if(nFmt == fourcc('Y', '8', '0', '0')) {
+							size = nStride * nHeight;
+						} else if(nFmt == fourcc('N', 'V', '1', '6')) {
+							size = nStride * nHeight * 2;
+						} else {
+							err = -EINVAL;
+							LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
+							break;
+						}
+
+						void *memptr;
+						err = posix_memalign(&memptr, 4096, size);
+						if (err) {
+							LOGE("%s(%d): posix_memalign failed, err=%d", __FUNCTION__, __LINE__, err);
+							break;
+						}
+						oFreeStack += [memptr]() {
+							free(memptr);
+						};
+
+						pSysBufs[i] = (uint8_t*)memptr;
+					}
+					break;
+
+				case QVIO_BUF_TYPE_DMABUF: {
+#if BUILD_WITH_NVBUF
+					NvBufSurfaceCreateParams oNVBufParam;
+					memset(&oNVBufParam, 0, sizeof(oNVBufParam));
+					oNVBufParam.width = nWidth;
+					oNVBufParam.height = nHeight;
+					oNVBufParam.layout = NVBUF_LAYOUT_PITCH;
+					oNVBufParam.memType = NVBUF_MEM_DEFAULT;
+					oNVBufParam.gpuId = 0;
 					if(nFmt == fourcc('Y', '8', '0', '0')) {
-						size = nStride * nHeight;
+						oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_GRAY8;
 					} else if(nFmt == fourcc('N', 'V', '1', '6')) {
-						size = nStride * nHeight * 2;
+						oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_NV16;
 					} else {
-						err = EINVAL;
+						err = -EINVAL;
 						LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
 						break;
 					}
 
-					void *memptr;
-					err = posix_memalign(&memptr, 4096, size);
-					if (err) {
-						LOGE("%s(%d): posix_memalign failed, err=%d", __FUNCTION__, __LINE__, err);
-						break;
-					}
-					oFreeStack += [memptr]() {
-						free(memptr);
-					};
-
-					pSysBufs[i] = (uint8_t*)memptr;
-				}
-				if(err < 0)
-					break;
-
-#if BUILD_WITH_NVBUF
-				NvBufSurfaceCreateParams oNVBufParam;
-				memset(&oNVBufParam, 0, sizeof(oNVBufParam));
-				oNVBufParam.width = nWidth;
-				oNVBufParam.height = nHeight;
-				oNVBufParam.layout = NVBUF_LAYOUT_PITCH;
-				oNVBufParam.memType = NVBUF_MEM_DEFAULT;
-				oNVBufParam.gpuId = 0;
-				if(nFmt == fourcc('Y', '8', '0', '0')) {
-					oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_GRAY8;
-				} else if(nFmt == fourcc('N', 'V', '1', '6')) {
-					oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_NV16;
-				} else {
-					err = EINVAL;
-					LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
-					break;
-				}
-
-				pNVBuf_surfaces.resize(nBuffers);
-				for(int i = 0;i < pNVBuf_surfaces.size();i++) {
-					err = NvBufSurfaceCreate(&pNVBuf_surfaces[i], 1, &oNVBufParam);
-					if(err) {
-						err = errno;
-						LOGE("%s(%d): NvBufSurfaceCreate() failed, err=%d", __FUNCTION__, __LINE__, err);
-						break;
-					}
-
-					NvBufSurfaceParams& surfaceParams = pNVBuf_surfaces[i]->surfaceList[0];
-
-					LOGD("surfaceParams={.width=%d, .height=%d, .bufferDesc=%d, .pitch=%d(%d/%d), offset=%d/%d, psize=%d/%d}",
-						surfaceParams.width, surfaceParams.height, (int)surfaceParams.bufferDesc,
-						surfaceParams.pitch, surfaceParams.planeParams.pitch[0], surfaceParams.planeParams.pitch[1],
-						surfaceParams.planeParams.offset[0], surfaceParams.planeParams.offset[1],
-						surfaceParams.planeParams.psize[0], surfaceParams.planeParams.psize[1]);
-
-					// fd = (int)surfaceParams.bufferDesc;
-					oFreeStack += [&, i]() {
-						int err;
-
-						err = NvBufSurfaceDestroy(pNVBuf_surfaces[i]);
+					pNVBuf_surfaces.resize(nBuffers);
+					for(int i = 0;i < pNVBuf_surfaces.size();i++) {
+						err = NvBufSurfaceCreate(&pNVBuf_surfaces[i], 1, &oNVBufParam);
 						if(err) {
-							err = errno;
-							LOGE("%s(%d): NvBufSurfaceDestroy() failed, err=%d", __FUNCTION__, __LINE__, err);
+							LOGE("%s(%d): NvBufSurfaceCreate() failed, err=%d", __FUNCTION__, __LINE__, err);
+							break;
 						}
-					};
+
+						NvBufSurfaceParams& surfaceParams = pNVBuf_surfaces[i]->surfaceList[0];
+
+						LOGD("surfaceParams={.width=%d, .height=%d, .bufferDesc=%d, .pitch=%d(%d/%d), offset=%d/%d, psize=%d/%d}",
+							surfaceParams.width, surfaceParams.height, (int)surfaceParams.bufferDesc,
+							surfaceParams.pitch, surfaceParams.planeParams.pitch[0], surfaceParams.planeParams.pitch[1],
+							surfaceParams.planeParams.offset[0], surfaceParams.planeParams.offset[1],
+							surfaceParams.planeParams.psize[0], surfaceParams.planeParams.psize[1]);
+
+						// fd = (int)surfaceParams.bufferDesc;
+						oFreeStack += [&, i]() {
+							int err;
+
+							err = NvBufSurfaceDestroy(pNVBuf_surfaces[i]);
+							if(err) {
+								LOGE("%s(%d): NvBufSurfaceDestroy() failed, err=%d", __FUNCTION__, __LINE__, err);
+							}
+						};
+					}
+#endif // BUILD_WITH_NVBUF
 				}
+					break;
+
+				default:
+					err = -EINVAL;
+					LOGE("%s(%d): unexpected value, nBufferType=%d", __FUNCTION__, __LINE__, nBufferType);
+					break;
+				}
+
 				if(err < 0)
 					break;
-#endif // BUILD_WITH_NVBUF
 
 				ZzUtils::TestLoop([&](int ch) -> int {
 					int err = 0;
@@ -179,6 +188,40 @@ namespace __10_qdma__ {
 
 					return err;
 				});
+			}
+
+			return err;
+		}
+
+		int ReqBufs_sysbuf(int fd) {
+			int err;
+
+			switch(1) { case 1:
+				qvio_req_bufs args;
+
+				memset(&args, 0, sizeof(args));
+				args.count = nBuffers;
+				args.buf_type = QVIO_BUF_TYPE_USERPTR;
+
+				if(nFmt == fourcc('Y', '8', '0', '0')) {
+					args.offset[0] = 0;
+					args.stride[0] = nStride;
+				} else if(nFmt == fourcc('N', 'V', '1', '6')) {
+					args.offset[0] = 0;
+					args.stride[0] = nStride;
+					args.offset[1] = nStride * nHeight;
+					args.stride[1] = nStride;
+				} else {
+					err = EINVAL;
+					LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
+					break;
+				}
+
+				err = ioctl(fd, QVIO_IOC_REQ_BUFS, &args);
+				if(err) {
+					LOGE("%s(%d): ioctl(QVIO_IOC_REQ_BUFS) failed, err=%d", __FUNCTION__, __LINE__, err);
+					break;
+				}
 			}
 
 			return err;
@@ -212,7 +255,6 @@ namespace __10_qdma__ {
 
 				err = ioctl(fd, QVIO_IOC_QBUF, &args);
 				if(err) {
-					err = errno;
 					LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
 					break;
 				}
@@ -221,6 +263,25 @@ namespace __10_qdma__ {
 			return err;
 		}
 
+		int ReqBufs_nvbuf(int fd) {
+			int err;
+
+			switch(1) { case 1:
+				qvio_req_bufs args;
+
+				memset(&args, 0, sizeof(args));
+				args.count = nBuffers;
+				args.buf_type = QVIO_BUF_TYPE_DMABUF;
+
+				err = ioctl(fd, QVIO_IOC_REQ_BUFS, &args);
+				if(err) {
+					LOGE("%s(%d): ioctl(QVIO_IOC_REQ_BUFS) failed, err=%d", __FUNCTION__, __LINE__, err);
+					break;
+				}
+			}
+
+			return err;
+		}
 		int EnqueueBuffer_nvbuf(int fd, int nIndex, qvio_buf_dir dir) {
 			int err;
 
@@ -239,7 +300,6 @@ namespace __10_qdma__ {
 				args.stride[1] = surfaceParams.planeParams.pitch[1];
 				err = ioctl(fd, QVIO_IOC_QBUF, &args);
 				if(err) {
-					err = errno;
 					LOGE("%s(%d): ioctl(QVIO_IOC_QBUF) failed, err=%d", __FUNCTION__, __LINE__, err);
 					break;
 				}
@@ -278,11 +338,29 @@ namespace __10_qdma__ {
 					}
 				}
 
+				LOGD("QVIO_IOC_REQ_BUFS...");
+				{
+					switch(nBufferType) {
+					case QVIO_BUF_TYPE_USERPTR:
+						err = ReqBufs_sysbuf(fd_qvio);
+						break;
+
+					case QVIO_BUF_TYPE_DMABUF:
+						err = ReqBufs_nvbuf(fd_qvio);
+						break;
+
+					default:
+						err = -EINVAL;
+						LOGE("%s(%d): unexpected value, nBufferType=%d", __FUNCTION__, __LINE__, nBufferType);
+						break;
+					};
+				}
+				if(err)
+					break;
+
 				LOGD("QVIO_IOC_QBUF...");
 				int nQbufs = 0;
 				{
-					qvio_buffer args;
-
 					for(int i = 0;i < nBuffers;i++) {
 						switch(nBufferType) {
 						case QVIO_BUF_TYPE_USERPTR:
@@ -294,14 +372,12 @@ namespace __10_qdma__ {
 							break;
 
 						default:
-							err = -1;
-							errno = EINVAL;
+							err = -EINVAL;
 							LOGE("%s(%d): unexpected value, nBufferType=%d", __FUNCTION__, __LINE__, nBufferType);
 							break;
 						}
 
-						if(err) {
-							err = errno;
+						if(err < 0) {
 							LOGE("%s(%d): EnqueueBuffer() failed, err=%d", __FUNCTION__, __LINE__, err);
 							break;
 						}

@@ -2,33 +2,33 @@
 
 #include "utils.h"
 
-ssize_t utils_calc_buf_size(struct qvio_format* format, __u32 offset[4], __u32 stride[4]) {
-	ssize_t ret;
+int utils_calc_buf_size(struct qvio_format* format, __u32 offset[4], __u32 stride[4], size_t* buffer_size) {
+	int err;
 
 	switch(format->fmt) {
 	case FOURCC_Y800:
-		ret = (ssize_t)(offset[0] + stride[0] * format->height);
+		*buffer_size = (ssize_t)(offset[0] + stride[0] * format->height);
 		break;
 
 	case FOURCC_NV16: // notice! offset[1] covers plane-0
-		ret = (ssize_t)(offset[1] + stride[1] * format->height);
+		*buffer_size = (ssize_t)(offset[1] + stride[1] * format->height);
 		break;
 
 	case FOURCC_NV12: // notice! offset[1] covers plane-0
-		ret = (ssize_t)(offset[1] + stride[1] * (format->height >> 1));
+		*buffer_size = (ssize_t)(offset[1] + stride[1] * (format->height >> 1));
 		break;
 
 	default:
 		pr_err("unexpected value, format->fmt=%08X\n", format->fmt);
-		ret = -EINVAL;
+		err = -EINVAL;
 		goto err0;
 		break;
 	}
 
-	return ret;
+	return 0;
 
 err0:
-	return ret;
+	return err;
 }
 
 void utils_sgt_dump(struct sg_table *sgt, bool full)

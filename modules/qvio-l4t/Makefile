@@ -15,11 +15,12 @@ qvio-objs := \
 	video_queue.o \
 	zdev.o \
 	qdma_wr.o \
-	qdma_rd.o
+	qdma_rd.o \
+	tpg.o
 
-# qvio-objs += \
-# 	video.o \
-# 	queue.o
+qvio-objs += \
+	video.o \
+	queue.o
 
 qvio-objs += pci_device.o
 # qvio-objs += platform_device.o

@@ -25,7 +25,7 @@ static inline u32 io_read_reg(uintptr_t BaseAddress, int RegOffset) {
     return ioread32((const volatile void *)(BaseAddress + RegOffset));
 }
 
-ssize_t utils_calc_buf_size(struct qvio_format* format, __u32 offset[4], __u32 stride[4]);
+int utils_calc_buf_size(struct qvio_format* format, __u32 offset[4], __u32 stride[4], size_t* buffer_size);
 void utils_sgt_dump(struct sg_table *sgt, bool full);
 
 #endif // __QVIO_UTILS_H__

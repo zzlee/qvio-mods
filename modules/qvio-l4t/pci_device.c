@@ -21,19 +21,6 @@
 #	define PCI_AER_NAMECHANGE (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0))
 #endif
 
-#if 0
-/* Interrupt Status and Control */
-#define IE_AP_DONE		BIT(0)
-#define IE_AP_READY		BIT(1)
-
-#define ISR_AP_DONE_IRQ		BIT(0)
-#define ISR_AP_READY_IRQ	BIT(1)
-
-#define ISR_ALL_IRQ_MASK	\
-		(ISR_AP_DONE_IRQ | \
-		ISR_AP_READY_IRQ)
-#endif
-
 static ssize_t dma_block_show(struct device *dev, struct device_attribute *attr, char *buf);
 static ssize_t dma_block_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
 static ssize_t dma_sync_show(struct device *dev, struct device_attribute *attr, char *buf);
@@ -62,7 +49,7 @@ static int msi_msix_capable(struct pci_dev *dev, int type);
 static irqreturn_t __irq_handler(int irq, void *dev_id);
 static int enable_msi_msix(struct qvio_pci_device* self, struct pci_dev* pdev);
 static void disable_msi_msix(struct qvio_pci_device* self, struct pci_dev* pdev);
-static void free_irqs(struct qvio_pci_device* self);
+static void free_irqs(struct qvio_pci_device* self, struct pci_dev* pdev);
 static int irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev);
 static void dma_blocks_free(struct qvio_pci_device* self);
 static int dma_blocks_alloc(struct qvio_pci_device* self);
@@ -85,12 +72,12 @@ static void device_remove(struct qvio_pci_device* self);
 static int device_7024_probe(struct qvio_pci_device* self);
 static void device_7024_remove(struct qvio_pci_device* self);
 static int device_7024_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev);
-static void device_7024_free_irqs(struct qvio_pci_device* self);
+static void device_7024_free_irqs(struct qvio_pci_device* self, struct pci_dev* pdev);
 static irqreturn_t device_7024_irq_handler(int irq, void *dev_id);
 static int device_e382_probe(struct qvio_pci_device* self);
 static void device_e382_remove(struct qvio_pci_device* self);
 static int device_e382_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev);
-static void device_e382_free_irqs(struct qvio_pci_device* self);
+static void device_e382_free_irqs(struct qvio_pci_device* self, struct pci_dev* pdev);
 
 static const struct pci_device_id __pci_ids[] = {
 	{ PCI_DEVICE(0x12AB, 0xE380), },
@@ -295,84 +282,6 @@ static ssize_t zdev_value0_store(struct device *dev, struct device_attribute *at
 	return qvio_zdev_attr_value0_store(zdev, buf, count);
 }
 
-#if 0
-static int start_buf_entry(struct qvio_device* self, struct qvio_buf_entry* buf_entry) {
-	int ret = 0;
-	u32* xdma_irq_block;
-	u32* xdma_h2c_channel;
-	u32* xdma_c2h_channel;
-	u32* xdma_h2c_sgdma;
-	u32* xdma_c2h_sgdma;
-	uintptr_t qdma_wr;
-	uintptr_t qdma_rd;
-	struct qvio_buf_regs* buf_regs = buf_entry->buf_regs;
-	struct qvio_buffer* buf = &buf_entry->buf;
-	struct dma_block_t* pDmaBlock;
-	struct xdma_desc* pSgdmaDesc;
-
-	switch(self->work_mode) {
-	case QVIO_WORK_MODE_XDMA_H2C:
-		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
-		xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
-		xdma_h2c_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x4, 0, 0));
-
-#if 1
-		xdma_irq_block[0x14 >> 2] = 0x01; // W1S engine_int_req[0:0]
-		xdma_h2c_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr));
-		xdma_h2c_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr));
-		xdma_h2c_sgdma[0x88 >> 2] = buf_entry->dsc_adj;
-		xdma_h2c_channel[0x04 >> 2] = BIT(0) | BIT(1); // Run & ie_descriptor_stopped
-#endif
-		pr_info("XDMA H2C started...\n");
-		break;
-
-	case QVIO_WORK_MODE_XDMA_C2H:
-		xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
-		xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
-		xdma_c2h_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x5, 0, 0));
-
-#if 1
-		xdma_irq_block[0x14 >> 2] = 0x02; // W1S engine_int_req[1:1]
-		xdma_c2h_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr));
-		xdma_c2h_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr));
-		xdma_c2h_sgdma[0x88 >> 2] = buf_entry->dsc_adj;
-		xdma_c2h_channel[0x04 >> 2] = BIT(0) | BIT(1); // Run & ie_descriptor_stopped
-#endif
-		pr_info("XDMA C2H started...\n");
-		break;
-
-	case QVIO_WORK_MODE_QDMA_RD:
-		pDmaBlock = &buf_entry->desc_blocks[0];
-		pSgdmaDesc = pDmaBlock->cpu_addr;
-
-		pr_info("%d x %d, %x:%x\n", self->format.width, self->format.height,
-			(u32)pSgdmaDesc->src_addr_hi, (u32)pSgdmaDesc->src_addr_lo);
-
-		qdma_rd = (uintptr_t)self->qdma_rd;
-		pr_info("qdma_rd[0x00]=0x%x\n", io_read_reg(qdma_rd, 0x00));
-		io_write_reg(qdma_rd, 0x10, cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr)));
-		io_write_reg(qdma_rd, 0x14, cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr)));
-		io_write_reg(qdma_rd, 0x18, buf_entry->dsc_adj);
-		io_write_reg(qdma_rd, 0x1C, self->format.width * self->format.height);
-		io_write_reg(qdma_rd, 0x00, 0x01); // ap_start
-
-		pr_info("QDMA RD started...\n");
-		break;
-
-	default:
-		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
-		ret = -EINVAL;
-		goto err0;
-		break;
-	}
-
-	return 0;
-
-err0:
-	return ret;
-}
-#endif
-
 static DEVICE_ATTR(dma_block, 0644, dma_block_show, dma_block_store);
 static DEVICE_ATTR(dma_sync, 0664, dma_sync_show, dma_sync_store);
 static DEVICE_ATTR(dma_block_index, 0644, dma_block_index_show, dma_block_index_store);
@@ -380,183 +289,6 @@ static DEVICE_ATTR(test_case, 0644, test_case_show, test_case_store);
 static DEVICE_ATTR(zdev_ver, 0444, zdev_ver_show, NULL);
 static DEVICE_ATTR(zdev_ticks, 0444, zdev_ticks_show, NULL);
 static DEVICE_ATTR(zdev_value0, 0644, zdev_value0_show, zdev_value0_store);
-
-#if 0
-static int buf_entry_from_sgt(struct qvio_device* self, struct sg_table* sgt, struct qvio_buffer* buf, ssize_t buf_size, struct qvio_buf_entry** ppBufEntry) {
-	int ret;
-	struct qvio_buf_entry* buf_entry;
-	struct desc_item_t* pSgDescItems;
-	struct scatterlist* sg;
-	int nents;
-	int sg_index;
-	int sg_offset;
-	struct dma_block_t* pDescBlock;
-	struct dma_block_t* pDescBlockEnd;
-	struct qvio_buf_regs* buf_regs;
-	int nDescItemCount;
-	int i;
-	struct dma_block_t* pDmaBlock;
-	struct xdma_desc* pSgdmaDesc;
-	dma_addr_t src_addr;
-	dma_addr_t dst_addr;
-	dma_addr_t nxt_addr;
-	int Nxt_adj;
-	ssize_t sg_bytes;
-
-	buf_entry = qvio_buf_entry_new();
-	if(! buf_entry) {
-		ret = ENOMEM;
-		goto err0;
-	}
-
-	buf_entry->dev = self->dev;
-	buf_entry->desc_pool = self->desc_pool;
-
-	pSgDescItems = NULL;
-	sg = sgt->sgl;
-	nents = sgt->nents;
-
-	switch(self->work_mode) {
-	case QVIO_WORK_MODE_AXIMM_TEST3:
-	case QVIO_WORK_MODE_XDMA_H2C:
-	case QVIO_WORK_MODE_QDMA_RD:
-		pDmaBlock = &buf_entry->desc_blocks[0];
-		ret = qvio_dma_block_alloc(pDmaBlock, buf_entry->desc_pool, GFP_KERNEL | GFP_DMA);
-		if(ret) {
-			pr_err("qvio_dma_block_alloc() failed, ret=%d\n", ret);
-			goto err1;
-		}
-
-		if(nents >= PAGE_SIZE / sizeof(struct xdma_desc)) {
-			ret = EINVAL;
-			pr_err("unexpected value, nents=%d\n", nents);
-			goto err1;
-		}
-
-		pSgdmaDesc = pDmaBlock->cpu_addr;
-		Nxt_adj = nents - 1;
-		dst_addr = 0xA0000000;
-
-		sg_bytes = 0;
-		for (i = 0; i < nents && sg_bytes < buf_size; i++, sg = sg_next(sg), pSgdmaDesc++, Nxt_adj--) {
-			src_addr = sg_dma_address(sg);
-			nxt_addr = pDmaBlock->dma_handle + ((u8*)(pSgdmaDesc + 1) - (u8*)pDmaBlock->cpu_addr);
-
-#if 0
-			pr_warn("%d, src_addr 0x%llx, dst_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d\n",
-				i, src_addr, dst_addr, nxt_addr, Nxt_adj);
-#endif
-
-#if 1
-			pSgdmaDesc->control = cpu_to_le32(DESC_MAGIC | (Nxt_adj << 8));
-			pSgdmaDesc->bytes = sg_dma_len(sg);
-			pSgdmaDesc->src_addr_lo = cpu_to_le32(PCI_DMA_L(src_addr));
-			pSgdmaDesc->src_addr_hi = cpu_to_le32(PCI_DMA_H(src_addr));
-			pSgdmaDesc->dst_addr_lo = cpu_to_le32(PCI_DMA_L(dst_addr));
-			pSgdmaDesc->dst_addr_hi = cpu_to_le32(PCI_DMA_H(dst_addr));
-			pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
-			pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
-#endif
-
-			sg_bytes += sg_dma_len(sg);
-			dst_addr += sg_dma_len(sg);
-		}
-
-#if 1
-		pSgdmaDesc--;
-		pSgdmaDesc->control |= cpu_to_le32(XDMA_DESC_STOPPED);
-		pSgdmaDesc->next_lo = 0;
-		pSgdmaDesc->next_hi = 0;
-#endif
-
-		buf_entry->dsc_adr = pDmaBlock->dma_handle;
-		buf_entry->dsc_adj = i - 1;
-#if 0
-		pr_warn("dsc_adr 0x%llx, dsc_adj %u\n", buf_entry->dsc_adr, buf_entry->dsc_adj);
-#endif
-
-		dma_sync_single_for_device(self->dev, pDmaBlock->dma_handle, PAGE_SIZE, DMA_FROM_DEVICE);
-		break;
-
-	case QVIO_WORK_MODE_AXIMM_TEST2:
-	case QVIO_WORK_MODE_XDMA_C2H:
-	case QVIO_WORK_MODE_QDMA_WR:
-		pDmaBlock = &buf_entry->desc_blocks[0];
-		ret = qvio_dma_block_alloc(pDmaBlock, buf_entry->desc_pool, GFP_KERNEL | GFP_DMA);
-		if(ret) {
-			pr_err("qvio_dma_block_alloc() failed, ret=%d\n", ret);
-			goto err1;
-		}
-
-		if(nents >= PAGE_SIZE / sizeof(struct xdma_desc)) {
-			ret = EINVAL;
-			pr_err("unexpected value, nents=%d\n", nents);
-			goto err1;
-		}
-
-		pSgdmaDesc = pDmaBlock->cpu_addr;
-		Nxt_adj = nents - 1;
-		src_addr = 0xA0000000;
-
-		sg_bytes = 0;
-		for (i = 0; i < nents && sg_bytes < buf_size; i++, sg = sg_next(sg), pSgdmaDesc++, Nxt_adj--) {
-			dst_addr = sg_dma_address(sg);
-			nxt_addr = pDmaBlock->dma_handle + ((u8*)(pSgdmaDesc + 1) - (u8*)pDmaBlock->cpu_addr);
-
-#if 0
-			pr_warn("%d, src_addr 0x%llx, dst_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d len %d\n",
-				i, src_addr, dst_addr, nxt_addr, Nxt_adj, sg_dma_len(sg));
-#endif
-
-#if 1
-			pSgdmaDesc->control = cpu_to_le32(DESC_MAGIC | (Nxt_adj << 8));
-			pSgdmaDesc->bytes = sg_dma_len(sg);
-			pSgdmaDesc->src_addr_lo = cpu_to_le32(PCI_DMA_L(src_addr));
-			pSgdmaDesc->src_addr_hi = cpu_to_le32(PCI_DMA_H(src_addr));
-			pSgdmaDesc->dst_addr_lo = cpu_to_le32(PCI_DMA_L(dst_addr));
-			pSgdmaDesc->dst_addr_hi = cpu_to_le32(PCI_DMA_H(dst_addr));
-			pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
-			pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
-#endif
-
-			sg_bytes += sg_dma_len(sg);
-			src_addr += sg_dma_len(sg);
-		}
-
-#if 1
-		pSgdmaDesc--;
-		pSgdmaDesc->control |= cpu_to_le32(XDMA_DESC_STOPPED);
-		pSgdmaDesc->next_lo = 0;
-		pSgdmaDesc->next_hi = 0;
-#endif
-
-		buf_entry->dsc_adr = pDmaBlock->dma_handle;
-		buf_entry->dsc_adj = i - 1;
-#if 0
-		pr_warn("dsc_adr 0x%llx, dsc_adj %u\n", buf_entry->dsc_adr, buf_entry->dsc_adj);
-#endif
-
-		dma_sync_single_for_device(self->dev, pDmaBlock->dma_handle, PAGE_SIZE, DMA_FROM_DEVICE);
-		break;
-
-	default:
-		pr_err("unexpected value, self->work_mode=%d\n", self->work_mode);
-		ret = EINVAL;
-		goto err1;
-	}
-
-	*ppBufEntry = buf_entry;
-
-	return 0;
-
-err2:
-	if(pSgDescItems) vfree(pSgDescItems);
-err1:
-	qvio_buf_entry_put(buf_entry);
-err0:
-	return ret;
-}
-#endif
 
 static int map_single_bar(struct qvio_pci_device *self, int idx)
 {
@@ -799,201 +531,6 @@ static irqreturn_t __irq_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-#if 0
-static irqreturn_t __irq_handler_xdma(int irq, void *dev_id)
-{
-	struct qvio_device* self = dev_id;
-	u32* zzlab_env;
-	u32* xdma_irq_block;
-	u32* xdma_h2c_channel;
-	u32* xdma_c2h_channel;
-	u32* xdma_h2c_sgdma;
-	u32* xdma_c2h_sgdma;
-	u32 usr_irq_req, usr_int_pend;
-	u32 intr;
-	int i, intr_mask;
-	u32 engine_int_req, engine_int_pend;
-	u32 Status;
-	struct qvio_buf_entry* done_entry;
-	struct qvio_buf_entry* next_entry;
-
-#if 0
-	pr_info("XDMA, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
-	self->irq_counter++;
-#endif
-
-	zzlab_env = (u32*)self->zzlab_env;
-	xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
-
-	usr_irq_req = xdma_irq_block[0x40 >> 2];
-	usr_int_pend = xdma_irq_block[0x48 >> 2];
-	intr = zzlab_env[0x28 >> 2];
-	engine_int_req = xdma_irq_block[0x44 >> 2];
-	engine_int_pend = xdma_irq_block[0x4C >> 2];
-
-	// pr_info("usr_irq_req=0x%X usr_int_pend=0x%X, intr=0x%X\n", usr_irq_req, usr_int_pend, intr);
-	for(i = 0;i < 4;i++) {
-		intr_mask = 1 << i;
-
-		if(usr_irq_req & intr_mask) {
-			pr_info("User Interrupt %d\n", i);
-
-			intr &= ~intr_mask;
-
-			zzlab_env[0x28 >> 2] = intr;
-		}
-	}
-
-	// pr_info("engine_int_req=0x%X engine_int_pend=0x%X\n", engine_int_req, engine_int_pend);
-	if(engine_int_req & 0x01) switch(1) { case 1: // H2C
-		xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
-		xdma_h2c_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x4, 0, 0));
-
-		xdma_irq_block[0x18 >> 2] = 0x01; // W1C engine_int_req[0:0]
-		Status = xdma_h2c_channel[0x44 >> 2];
-
-#if 0
-		pr_info("Engine Interrupt H2C, Status=%d\n", Status);
-		pr_info("H2C Channel Completed Descriptor Count: %d\n", xdma_h2c_channel[0x48 >> 2]);
-#endif
-
-		xdma_h2c_channel[0x04 >> 2] = 0; // Stop
-
-		spin_lock(&self->lock);
-		if(list_empty(&self->job_list)) {
-			spin_unlock(&self->lock);
-			pr_err("self->job_list is empty\n");
-			break;
-		}
-
-		// move job from job_list to done_list
-		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
-		list_del(&done_entry->node);
-		// try pick next job
-		next_entry = list_empty(&self->job_list) ? NULL :
-			list_first_entry(&self->job_list, struct qvio_buf_entry, node);
-
-		list_add_tail(&done_entry->node, &self->done_list);
-		spin_unlock(&self->lock);
-
-		// job done wake up
-		wake_up_interruptible(&self->irq_wait);
-
-		// try to do another job
-		if(next_entry) {
-			xdma_irq_block[0x14 >> 2] = 0x01; // W1S engine_int_req[0:0]
-			xdma_h2c_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(next_entry->dsc_adr));
-			xdma_h2c_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(next_entry->dsc_adr));
-			xdma_h2c_sgdma[0x88 >> 2] = next_entry->dsc_adj;
-			xdma_h2c_channel[0x04 >> 2] = BIT(0) | BIT(1); // Run & ie_descriptor_stopped
-		} else {
-			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
-		}
-	}
-
-	if(engine_int_req & 0x02) switch(1) { case 1: // C2H
-		xdma_c2h_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x1, 0, 0));
-		xdma_c2h_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x5, 0, 0));
-
-		xdma_irq_block[0x18 >> 2] = 0x02; // W1C engine_int_req[1:1]
-		Status = xdma_c2h_channel[0x44 >> 2];
-		pr_info("Engine Interrupt C2H, Status=%d\n", Status);
-
-		xdma_c2h_channel[0x04 >> 2] = 0; // Stop
-
-		spin_lock(&self->lock);
-		if(list_empty(&self->job_list)) {
-			spin_unlock(&self->lock);
-			pr_err("self->job_list is empty\n");
-			break;
-		}
-
-		// move job from job_list to done_list
-		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
-		list_del(&done_entry->node);
-		// try pick next job
-		next_entry = list_empty(&self->job_list) ? NULL :
-			list_first_entry(&self->job_list, struct qvio_buf_entry, node);
-
-		list_add_tail(&done_entry->node, &self->done_list);
-		spin_unlock(&self->lock);
-
-		// job done wake up
-		wake_up_interruptible(&self->irq_wait);
-
-		// try to do another job
-		if(next_entry) {
-			xdma_irq_block[0x14 >> 2] = 0x02; // W1S engine_int_req[1:1]
-			xdma_c2h_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(next_entry->dsc_adr));
-			xdma_c2h_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(next_entry->dsc_adr));
-			xdma_c2h_sgdma[0x88 >> 2] = next_entry->dsc_adj;
-			xdma_c2h_channel[0x04 >> 2] = BIT(0) | BIT(1); // Run & ie_descriptor_stopped
-		} else {
-			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
-		}
-	}
-
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t __irq_handler_qdma_rd(int irq, void *dev_id) {
-	struct qvio_device* self = dev_id;
-	uintptr_t qdma_rd = (uintptr_t)self->qdma_rd;
-	u32 value;
-	struct qvio_buf_entry* done_entry;
-	struct qvio_buf_entry* next_entry;
-
-#if 0
-	pr_info("QDMA-RD, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
-	self->irq_counter++;
-#endif
-
-#if 1
-	value = io_read_reg(qdma_rd, 0x0C); // ISR (ap_done)
-	if(! (value & 0x01)) {
-		pr_warn("unexpected, value=%u\n", value);
-		return IRQ_NONE;
-	}
-
-	io_write_reg(qdma_rd, 0x0C, value & 0x01); // ap_done, TOW
-
-	if(value & 0x01) switch(1) { case 1:
-		spin_lock(&self->lock);
-		if(list_empty(&self->job_list)) {
-			spin_unlock(&self->lock);
-			pr_err("self->job_list is empty\n");
-			break;
-		}
-
-		// move job from job_list to done_list
-		done_entry = list_first_entry(&self->job_list, struct qvio_buf_entry, node);
-		list_del(&done_entry->node);
-		// try pick next job
-		next_entry = list_empty(&self->job_list) ? NULL :
-			list_first_entry(&self->job_list, struct qvio_buf_entry, node);
-
-		list_add_tail(&done_entry->node, &self->done_list);
-		spin_unlock(&self->lock);
-
-		// job done wake up
-		wake_up_interruptible(&self->irq_wait);
-
-		// try to do another job
-		if(next_entry) {
-			io_write_reg(qdma_rd, 0x10, cpu_to_le32(PCI_DMA_L(next_entry->dsc_adr)));
-			io_write_reg(qdma_rd, 0x14, cpu_to_le32(PCI_DMA_H(next_entry->dsc_adr)));
-			io_write_reg(qdma_rd, 0x18, next_entry->dsc_adj);
-			io_write_reg(qdma_rd, 0x00, 0x01); // ap_start
-		} else {
-			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
-		}
-	}
-#endif
-
-	return IRQ_HANDLED;
-}
-#endif
-
 static int enable_msi_msix(struct qvio_pci_device* self, struct pci_dev* pdev) {
 	int err;
 	int msi_vec_count;
@@ -1042,14 +579,14 @@ static void disable_msi_msix(struct qvio_pci_device* self, struct pci_dev* pdev)
 	}
 }
 
-static void free_irqs(struct qvio_pci_device* self) {
+static void free_irqs(struct qvio_pci_device* self, struct pci_dev* pdev) {
 	switch(self->device_id & 0xFFFF) {
 	case 0xE382:
-		device_e382_free_irqs(self);
+		device_e382_free_irqs(self, pdev);
 		break;
 
 	case 0x7024:
-		device_7024_free_irqs(self);
+		device_7024_free_irqs(self, pdev);
 		break;
 	}
 }
@@ -1078,7 +615,7 @@ static int irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev) {
 	return 0;
 
 err0:
-	free_irqs(self);
+	free_irqs(self, pdev);
 
 	return err;
 }
@@ -1301,7 +838,7 @@ err8:
 err7:
 	dma_pool_destroy(self->desc_pool);
 err6:
-	free_irqs(self);
+	free_irqs(self, pdev);
 err5:
 	device_remove(self);
 err4:
@@ -1327,7 +864,7 @@ static void __pci_remove(struct pci_dev *pdev) {
 	remove_dev_attrs(&pdev->dev);
 	dma_blocks_free(self);
 	dma_pool_destroy(self->desc_pool);
-	free_irqs(self);
+	free_irqs(self, pdev);
 	device_remove(self);
 	disable_msi_msix(self, pdev);
 	unmap_bars(self);
@@ -1603,7 +1140,7 @@ static int device_7024_probe(struct qvio_pci_device* self) {
 
 	self->qdma_wr->dev = self->dev;
 	self->qdma_wr->device_id = self->device_id;
-	self->qdma_wr->reg_zdev = (void __iomem *)((u64)self->bar[0] + 0x00000);
+	self->qdma_wr->zdev = self->zdev;
 	self->qdma_wr->reg = (void __iomem *)((u64)self->bar[0] + 0x10000);
 	err = qvio_qdma_wr_probe(self->qdma_wr);
 	if(err) {
@@ -1613,7 +1150,7 @@ static int device_7024_probe(struct qvio_pci_device* self) {
 
 	self->qdma_rd->dev = self->dev;
 	self->qdma_rd->device_id = self->device_id;
-	self->qdma_rd->reg_zdev = (void __iomem *)((u64)self->bar[0] + 0x00000);
+	self->qdma_rd->zdev = self->zdev;
 	self->qdma_rd->reg = (void __iomem *)((u64)self->bar[0] + 0x11000);
 	err = qvio_qdma_rd_probe(self->qdma_rd);
 	if(err) {
@@ -1639,35 +1176,53 @@ static void device_7024_remove(struct qvio_pci_device* self) {
 
 static int device_7024_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev) {
 	int err;
+	uintptr_t reg_intr = (uintptr_t)self->reg_intr;
 	int i;
 	int irq_count;
 	u32 value;
-	uintptr_t reg_intr;
 	u32 vector;
-	irqreturn_t (*irq_handler_map[])(int irq, void *dev_id) = {
-		qvio_qdma_wr_irq_handler,
-		qvio_qdma_rd_irq_handler,
-	};
-	const char* irq_handler_name[] = {
-		"qdma_wr",
-		"qdma_rd",
-	};
-	void* irq_handler_dev[] = {
-		self->qdma_wr,
-		self->qdma_rd,
-	};
 
 	if(self->msi_enabled) {
 		irq_count = pci_msi_vec_count(pdev);
 
-#if 0 // USE_MULTI_IRQS
-		if(irq_count < 2) {
-			pr_err("irq_count=%d", irq_count);
-			err = -EINVAL;
-			goto err0;
-		}
+		if(irq_count >= 2) {
+			irqreturn_t (*irq_handler_map[])(int irq, void *dev_id) = {
+				qvio_qdma_wr_irq_handler,
+				qvio_qdma_rd_irq_handler,
+			};
+			const char* irq_handler_name[] = {
+				"qdma_wr",
+				"qdma_rd",
+			};
+			void* irq_handler_dev[] = {
+				self->qdma_wr,
+				self->qdma_rd,
+			};
 
-		for(i = 0;i < 2;i++) {
+			for(i = 0;i < 2;i++) {
+				vector = pci_irq_vector(pdev, i);
+				if(vector == -EINVAL) {
+					err = -EINVAL;
+					pr_err("pci_irq_vector() failed\n");
+					goto err0;
+				}
+
+				pr_info("request_irq(%d, \"%s\", %p)\n", vector, irq_handler_name[i], irq_handler_dev[i]);
+				err = request_irq(vector, irq_handler_map[i], 0, irq_handler_name[i], irq_handler_dev[i]);
+				if(err) {
+					pr_err("%d: request_irq(%u) failed, err=%d\n", i, vector, err);
+					goto err0;
+				}
+				self->irq_lines[i] = vector;
+			}
+
+			// IRQ Block User Vector Number
+			value = io_read_reg(reg_intr, 0x00);
+			value = (value & ~(0xFF << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
+			value = (value & ~(0xFF << 8)) | (1 << 8); // Map usr_irq_req[1] to MSI-X Vector 1
+			io_write_reg(reg_intr, 0x00, value);
+		} else if(irq_count >= 1) { // aggregate irq handler
+			i = 0;
 			vector = pci_irq_vector(pdev, i);
 			if(vector == -EINVAL) {
 				err = -EINVAL;
@@ -1675,52 +1230,24 @@ static int device_7024_irq_setup(struct qvio_pci_device* self, struct pci_dev* p
 				goto err0;
 			}
 
-			pr_info("request_irq(%d, \"%s\", %p)\n", vector, irq_handler_name[i], irq_handler_dev[i]);
-			err = request_irq(vector, irq_handler_map[i], 0, irq_handler_name[i], irq_handler_dev[i]);
+			pr_info("request_irq(%d, \"%s\", %p)\n", vector, DRV_MODULE_NAME, self);
+			err = request_irq(vector, device_7024_irq_handler, 0, DRV_MODULE_NAME, self);
 			if(err) {
 				pr_err("%d: request_irq(%u) failed, err=%d\n", i, vector, err);
 				goto err0;
 			}
 			self->irq_lines[i] = vector;
-		}
 
-		// IRQ Block User Vector Number
-		reg_intr = (uintptr_t)self->reg_intr;
-		value = io_read_reg(reg_intr, 0x00);
-		value = (value & ~(0xFF << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
-		value = (value & ~(0xFF << 8)) | (1 << 8); // Map usr_irq_req[1] to MSI-X Vector 1
-		io_write_reg(reg_intr, 0x00, value);
-#else
-		if(irq_count < 1) {
+			// IRQ Block User Vector Number
+			value = io_read_reg(reg_intr, 0x00);
+			value = (value & ~(0xFF << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
+			value = (value & ~(0xFF << 8)) | (0 << 8); // Map usr_irq_req[1] to MSI-X Vector 0
+			io_write_reg(reg_intr, 0x00, value);
+		} else {
 			pr_err("irq_count=%d", irq_count);
 			err = -EINVAL;
 			goto err0;
 		}
-
-		i = 0;
-		vector = pci_irq_vector(pdev, i);
-		if(vector == -EINVAL) {
-			err = -EINVAL;
-			pr_err("pci_irq_vector() failed\n");
-			goto err0;
-		}
-
-		pr_info("request_irq(%d, \"%s\", %p)\n", vector, DRV_MODULE_NAME, self);
-		err = request_irq(vector, device_7024_irq_handler, 0, DRV_MODULE_NAME, self);
-		if(err) {
-			pr_err("%d: request_irq(%u) failed, err=%d\n", i, vector, err);
-			goto err0;
-		}
-		self->irq_lines[i] = vector;
-
-		// IRQ Block User Vector Number
-		reg_intr = (uintptr_t)self->reg_intr;
-		value = io_read_reg(reg_intr, 0x00);
-		value = (value & ~(0xFF << 0)) | (0 << 0); // Map usr_irq_req[0] to MSI-X Vector 0
-		value = (value & ~(0xFF << 8)) | (0 << 8); // Map usr_irq_req[1] to MSI-X Vector 0
-		io_write_reg(reg_intr, 0x00, value);
-#endif
-
 	}
 
 	return 0;
@@ -1729,29 +1256,35 @@ err0:
 	return err;
 }
 
-static void device_7024_free_irqs(struct qvio_pci_device* self) {
+static void device_7024_free_irqs(struct qvio_pci_device* self, struct pci_dev* pdev) {
 	int i;
-	void* irq_handler_dev[] = {
-		self->qdma_wr,
-		self->qdma_rd
-	};
+	int irq_count;
 
-#if 0 // USE_MULTI_IRQS
-	for(i = 0;i < 2;i++) {
-		if(self->irq_lines[i]) {
-			pr_info("free_irq(%d, %p)\n", self->irq_lines[i], irq_handler_dev[i]);
-			free_irq(self->irq_lines[i], irq_handler_dev[i]);
-			self->irq_lines[i] = 0;
+	if(self->msi_enabled) {
+		irq_count = pci_msi_vec_count(pdev);
+
+		if(irq_count >= 2) {
+			void* irq_handler_dev[] = {
+				self->qdma_wr,
+				self->qdma_rd
+			};
+
+			for(i = 0;i < 2;i++) {
+				if(self->irq_lines[i]) {
+					pr_info("free_irq(%d, %p)\n", self->irq_lines[i], irq_handler_dev[i]);
+					free_irq(self->irq_lines[i], irq_handler_dev[i]);
+					self->irq_lines[i] = 0;
+				}
+			}
+		} if(irq_count >= 1) {
+			i = 0;
+			if(self->irq_lines[i]) {
+				pr_info("free_irq(%d, %p)\n", self->irq_lines[i], self);
+				free_irq(self->irq_lines[i], self);
+				self->irq_lines[i] = 0;
+			}
 		}
 	}
-#else
-	i = 0;
-	if(self->irq_lines[i]) {
-		pr_info("free_irq(%d, %p)\n", self->irq_lines[i], self);
-		free_irq(self->irq_lines[i], self);
-		self->irq_lines[i] = 0;
-	}
-#endif
 }
 
 static irqreturn_t device_7024_irq_handler(int irq, void *dev_id) {
@@ -1799,16 +1332,20 @@ static int device_e382_probe(struct qvio_pci_device* self) {
 
 	xdma_h2c_channel[0x90 >> 2] = BIT(1); // im_descriptor_stopped
 	xdma_c2h_channel[0x90 >> 2] = BIT(1); // im_descriptor_stopped
+
+	return 0;
 }
 
 static void device_e382_remove(struct qvio_pci_device* self) {
-	// TODO:
+	pr_info("TODO: \n");
 }
 
 static int device_e382_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev) {
-	// TODO:
+	pr_info("TODO: \n");
+
+	return 0;
 }
 
-static void device_e382_free_irqs(struct qvio_pci_device* self) {
-	// TODO:
+static void device_e382_free_irqs(struct qvio_pci_device* self, struct pci_dev* pdev) {
+	pr_info("TODO: \n");
 }
