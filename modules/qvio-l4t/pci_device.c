@@ -970,14 +970,22 @@ int qvio_pci_device_register(void) {
 		goto err2;
 	}
 
+	err = qvio_tpg_register();
+	if(err) {
+		pr_err("qvio_tpg_register() failed\n");
+		goto err3;
+	}
+
 	err = pci_register_driver(&pci_driver); // will trigger pci_probe
 	if(err) {
 		pr_err("pci_register_driver() failed\n");
-		goto err3;
+		goto err4;
 	}
 
 	return err;
 
+err4:
+	qvio_tpg_unregister();
 err3:
 	qvio_qdma_rd_unregister();
 err2:
@@ -992,6 +1000,7 @@ void qvio_pci_device_unregister(void) {
 	pr_info("\n");
 
 	pci_unregister_driver(&pci_driver);
+	qvio_tpg_unregister();
 	qvio_qdma_rd_unregister();
 	qvio_qdma_wr_unregister();
 	qvio_zdev_unregister();
@@ -1030,8 +1039,17 @@ struct qvio_pci_device* qvio_pci_device_new(void) {
 		goto err3;
 	}
 
+	self->tpg = qvio_tpg_new();
+	if(! self->tpg) {
+		pr_err("qvio_tpg_new() failed\n");
+		err = -ENOMEM;
+		goto err4;
+	}
+
 	return self;
 
+err4:
+	qvio_qdma_rd_put(self->qdma_rd);
 err3:
 	qvio_qdma_wr_put(self->qdma_wr);
 err2:
@@ -1055,6 +1073,7 @@ static void __free(struct kref *ref)
 
 	// pr_info("\n");
 
+	qvio_tpg_put(self->tpg);
 	qvio_qdma_rd_put(self->qdma_rd);
 	qvio_qdma_wr_put(self->qdma_wr);
 	qvio_zdev_put(self->zdev);
@@ -1154,12 +1173,24 @@ static int device_7024_probe(struct qvio_pci_device* self) {
 	self->qdma_rd->reg = (void __iomem *)((u64)self->bar[0] + 0x11000);
 	err = qvio_qdma_rd_probe(self->qdma_rd);
 	if(err) {
-		pr_err("qvio_qdma_wr_probe() failed, err=%d\n", err);
+		pr_err("qvio_qdma_rd_probe() failed, err=%d\n", err);
 		goto err2;
+	}
+
+	self->tpg->dev = self->dev;
+	self->tpg->device_id = self->device_id;
+	self->tpg->zdev = self->zdev;
+	self->tpg->reg = (void __iomem *)((u64)self->bar[0] + 0x20000);
+	err = qvio_tpg_probe(self->tpg);
+	if(err) {
+		pr_err("qvio_qdma_wr_probe() failed, err=%d\n", err);
+		goto err3;
 	}
 
 	return 0;
 
+err3:
+	qvio_qdma_rd_remove(self->qdma_rd);
 err2:
 	qvio_qdma_wr_remove(self->qdma_wr);
 err1:
@@ -1169,6 +1200,7 @@ err0:
 }
 
 static void device_7024_remove(struct qvio_pci_device* self) {
+	qvio_tpg_remove(self->tpg);
 	qvio_qdma_rd_remove(self->qdma_rd);
 	qvio_qdma_wr_remove(self->qdma_wr);
 	qvio_zdev_remove(self->zdev);

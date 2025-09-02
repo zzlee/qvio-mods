@@ -5,6 +5,8 @@
 
 #include "cdev.h"
 #include "zdev.h"
+#include "xv_tpg.h"
+#include "uapi/qvio-l4t.h"
 
 struct qvio_tpg {
 	struct kref ref;
@@ -14,6 +16,12 @@ struct qvio_tpg {
 	struct qvio_cdev cdev;
 
 	struct qvio_zdev* zdev;
+	void __iomem * reg;
+	XV_tpg xtpg;
+
+	struct qvio_format format;
+	struct qvio_tpg_config cur_config;
+	u32 nXtpgColorFormat;
 };
 
 // register

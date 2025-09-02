@@ -193,6 +193,10 @@ struct qvio_req_bufs {
 	__u32 stride[4];
 };
 
+struct qvio_tpg_config {
+	__u16 bypass;
+};
+
 #define QVIO_IOC_MAGIC		'Q'
 
 // qvio v4l2 ioctls
@@ -218,8 +222,8 @@ struct qvio_req_bufs {
 // #define QVIO_IOC_G_WORK_MODE	_IOR (QVIO_IOC_MAGIC, 0x9, int)
 #define QVIO_IOC_TPG_S_FMT		_IOW (QVIO_IOC_MAGIC, 0xA, struct qvio_format)
 #define QVIO_IOC_TPG_G_FMT		_IOR (QVIO_IOC_MAGIC, 0xA, struct qvio_format)
-#define QVIO_IOC_TPG_STREAMON	_IO  (QVIO_IOC_MAGIC, 0xB)
+#define QVIO_IOC_TPG_STREAMON	_IOW (QVIO_IOC_MAGIC, 0xB, struct qvio_tpg_config)
 #define QVIO_IOC_TPG_STREAMOFF	_IO  (QVIO_IOC_MAGIC, 0xC)
-#define QVIO_IOC_TPG_GEN		_IO  (QVIO_IOC_MAGIC, 0xD)
+#define QVIO_IOC_TPG_TRIGGER	_IO  (QVIO_IOC_MAGIC, 0xD)
 
 #endif /* _UAPI_LINUX_QVIO_L4T_H */

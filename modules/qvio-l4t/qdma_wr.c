@@ -180,7 +180,9 @@ irqreturn_t qvio_qdma_wr_irq_handler(int irq, void *dev_id) {
 	struct qvio_qdma_wr* self = dev_id;
 	uintptr_t reg = (uintptr_t)self->reg;
 	u32 value;
-	struct qvio_buf_entry* next_entry;
+	struct qvio_buf_entry* buf_entry;
+	struct dma_block_t* pDmaBlock;
+	struct xdma_desc* pSgdmaDesc;
 
 #if 1
 	value = io_read_reg(reg, 0x0C); // ISR (ap_done)
@@ -197,22 +199,29 @@ irqreturn_t qvio_qdma_wr_irq_handler(int irq, void *dev_id) {
 		self->irq_counter++;
 #endif
 
-		err = qvio_video_queue_done(self->video_queue, &next_entry);
+		err = qvio_video_queue_done(self->video_queue, &buf_entry);
 		if(err) {
 			pr_err("qvio_video_queue_done() failed, err=%u\n", err);
 			goto err0;
 		}
 
-		if(! next_entry) {
-			pr_warn("unexpected value, next_entry=%llX\n", (int64_t)next_entry);
+		if(! buf_entry) {
+			pr_warn("unexpected value, buf_entry=%llX\n", (int64_t)buf_entry);
 			goto err0;
 		}
 
+#if 0
+		pDmaBlock = &buf_entry->desc_blocks[0];
+		pSgdmaDesc = pDmaBlock->cpu_addr;
+		pr_info("reg[0x00]=0x%x dsc_adr 0x%llx, dsc_adj %u, dst_addr %x:%x\n",
+			io_read_reg(reg, 0x00), buf_entry->dsc_adr, buf_entry->dsc_adj, (u32)pSgdmaDesc->dst_addr_hi, (u32)pSgdmaDesc->dst_addr_lo);
+#endif
+
 #if 1
 		// try to do another job
-		io_write_reg(reg, 0x10, cpu_to_le32(PCI_DMA_L(next_entry->dsc_adr)));
-		io_write_reg(reg, 0x14, cpu_to_le32(PCI_DMA_H(next_entry->dsc_adr)));
-		io_write_reg(reg, 0x18, next_entry->dsc_adj);
+		io_write_reg(reg, 0x10, cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr)));
+		io_write_reg(reg, 0x14, cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr)));
+		io_write_reg(reg, 0x18, buf_entry->dsc_adj);
 		io_write_reg(reg, 0x00, 0x01); // ap_start
 #endif
 	}
@@ -313,27 +322,38 @@ err0:
 }
 
 static int __start_buf_entry(struct qvio_video_queue* self, struct qvio_buf_entry* buf_entry) {
+	int err;
 	struct qvio_qdma_wr* qdma_wr = self->parent;
 	uintptr_t reg = (uintptr_t)qdma_wr->reg;
 	struct dma_block_t* pDmaBlock;
 	struct xdma_desc* pSgdmaDesc;
+	size_t buffer_size;
+
+	err = utils_calc_buf_size0(&self->format, &buffer_size);
+	if(err < 0) {
+		pr_err("utils_calc_buf_size0() failed, err=%d\n", err);
+		goto err0;
+	}
+
+	pr_info("%08X %d x %d, %lu\n", self->format.fmt, self->format.width, self->format.height, buffer_size);
 
 	pDmaBlock = &buf_entry->desc_blocks[0];
 	pSgdmaDesc = pDmaBlock->cpu_addr;
+	pr_info("reg[0x00]=0x%x dsc_adr 0x%llx, dsc_adj %u, dst_addr %x:%x\n",
+		io_read_reg(reg, 0x00), buf_entry->dsc_adr, buf_entry->dsc_adj, (u32)pSgdmaDesc->dst_addr_hi, (u32)pSgdmaDesc->dst_addr_lo);
 
-	pr_info("%d x %d, %x:%x\n", self->format.width, self->format.height,
-		(u32)pSgdmaDesc->dst_addr_hi, (u32)pSgdmaDesc->dst_addr_lo);
-
-	pr_info("reg[0x00]=0x%x\n", io_read_reg(reg, 0x00));
 	io_write_reg(reg, 0x10, cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr)));
 	io_write_reg(reg, 0x14, cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr)));
 	io_write_reg(reg, 0x18, buf_entry->dsc_adj);
-	io_write_reg(reg, 0x1C, self->format.width * self->format.height);
+	io_write_reg(reg, 0x1C, buffer_size);
 	io_write_reg(reg, 0x00, 0x01); // ap_start
 
 	pr_info("QDMA WR started...\n");
 
 	return 0;
+
+err0:
+	return err;
 }
 
 static int __streamon(struct qvio_video_queue* self) {

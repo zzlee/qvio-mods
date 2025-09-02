@@ -136,6 +136,7 @@ static long __file_ioctl_s_fmt(struct qvio_video_queue* self, struct file * filp
 
 	switch(args.fmt) {
 	case FOURCC_Y800:
+	case FOURCC_RGB:
 		self->planes = 1;
 		break;
 
@@ -153,7 +154,7 @@ static long __file_ioctl_s_fmt(struct qvio_video_queue* self, struct file * filp
 	}
 
 	self->format = args;
-	pr_info("%dx%d 0x%08X\n", self->format.width, self->format.height, self->format.fmt);
+	pr_info("%dx%d %04X\n", self->format.width, self->format.height, self->format.fmt);
 
 	return 0;
 
@@ -215,7 +216,7 @@ static long __file_ioctl_req_bufs(struct qvio_video_queue* self, struct file * f
 	}
 
 	err = utils_calc_buf_size(&self->format, args.offset, args.stride, &self->buffer_size);
-	if(err <= 0) {
+	if(err < 0) {
 		pr_err("utils_calc_buf_size() failed, err=%d\n", err);
 		ret = err;
 		goto err0;

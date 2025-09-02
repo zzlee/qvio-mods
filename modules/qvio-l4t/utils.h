@@ -11,6 +11,8 @@ enum {
 	FOURCC_Y800 = 0x30303859,
 	FOURCC_NV12 = 0x3231564E,
 	FOURCC_NV16 = 0x3631564E,
+	FOURCC_Y444 = 0x34343459,
+	FOURCC_RGB = 0x00000000,
 };
 
 static inline uint32_t fourcc(char a, char b, char c, char d) {
@@ -26,6 +28,7 @@ static inline u32 io_read_reg(uintptr_t BaseAddress, int RegOffset) {
 }
 
 int utils_calc_buf_size(struct qvio_format* format, __u32 offset[4], __u32 stride[4], size_t* buffer_size);
+int utils_calc_buf_size0(struct qvio_format* format, size_t* buffer_size);
 void utils_sgt_dump(struct sg_table *sgt, bool full);
 
 #endif // __QVIO_UTILS_H__

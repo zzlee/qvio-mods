@@ -46,6 +46,7 @@ namespace __10_qdma__ {
 		int nWidth;
 		int nHeight;
 		int nStride;
+		int nFrameSize;
 		int nBuffers;
 		int nTimes;
 		qvio_buf_type nBufferType;
@@ -67,11 +68,12 @@ namespace __10_qdma__ {
 
 			LOGD("%s::%s", typeid(self_t).name(), __FUNCTION__);
 
-			nFmt = fourcc('Y', '8', '0', '0');
+			nFmt = fourcc(0, 0, 0, 0); // RGB
+			// nFmt = fourcc('Y', '8', '0', '0');
 			// nFmt = fourcc('N', 'V', '1', '6');
 			nWidth = 4096;
 			nHeight = 2160;
-			nStride = (nWidth + 31) / 32 * 32;
+			nStride = 0;
 			nBuffers = 4;
 			nTimes = nHeight;
 			nBufferType = QVIO_BUF_TYPE_USERPTR;
@@ -82,15 +84,33 @@ namespace __10_qdma__ {
 					oFreeStack.Flush();
 				});
 
+				if(nFmt == fourcc('Y', '8', '0', '0')) {
+					nFrameSize = nWidth * nHeight;
+				} else if(nFmt == fourcc('N', 'V', '1', '6')) {
+					nFrameSize = nWidth * nHeight * 2;
+				} else if(nFmt == fourcc(0, 0, 0, 0)) {
+					nFrameSize = nWidth * nHeight * 3;
+				} else {
+					err = -EINVAL;
+					LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
+					break;
+				}
+
+
 				switch(nBufferType) {
 				case QVIO_BUF_TYPE_USERPTR:
 					pSysBufs.resize(nBuffers);
 					for(int i = 0;i < pSysBufs.size();i++) {
 						int size;
 						if(nFmt == fourcc('Y', '8', '0', '0')) {
+							nStride = (nWidth + 31) / 32 * 32;
 							size = nStride * nHeight;
 						} else if(nFmt == fourcc('N', 'V', '1', '6')) {
+							nStride = (nWidth + 31) / 32 * 32;
 							size = nStride * nHeight * 2;
+						} else if(nFmt == fourcc(0, 0, 0, 0)) {
+							nStride = (nWidth * 3 + 31) / 32 * 32;
+							size = nStride * nHeight;
 						} else {
 							err = -EINVAL;
 							LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
@@ -122,8 +142,13 @@ namespace __10_qdma__ {
 					oNVBufParam.gpuId = 0;
 					if(nFmt == fourcc('Y', '8', '0', '0')) {
 						oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_GRAY8;
+						nStride = (nWidth + 31) / 32 * 32;
 					} else if(nFmt == fourcc('N', 'V', '1', '6')) {
 						oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_NV16;
+						nStride = (nWidth + 31) / 32 * 32;
+					} else if(nFmt == fourcc(0, 0, 0, 0)) {
+						oNVBufParam.colorFormat = NVBUF_COLOR_FORMAT_RGB;
+						nStride = (nWidth * 3 + 31) / 32 * 32;
 					} else {
 						err = -EINVAL;
 						LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
@@ -203,7 +228,7 @@ namespace __10_qdma__ {
 				args.count = nBuffers;
 				args.buf_type = QVIO_BUF_TYPE_USERPTR;
 
-				if(nFmt == fourcc('Y', '8', '0', '0')) {
+				if(nFmt == fourcc('Y', '8', '0', '0') || nFmt == fourcc(0, 0, 0, 0)) {
 					args.offset[0] = 0;
 					args.stride[0] = nStride;
 				} else if(nFmt == fourcc('N', 'V', '1', '6')) {
@@ -239,7 +264,7 @@ namespace __10_qdma__ {
 				args.buf_dir = dir;
 				args.u.userptr = (unsigned long)pSysBufs[nIndex];
 
-				if(nFmt == fourcc('Y', '8', '0', '0')) {
+				if(nFmt == fourcc('Y', '8', '0', '0') || nFmt == fourcc(0, 0, 0, 0)) {
 					args.offset[0] = 0;
 					args.stride[0] = nStride;
 				} else if(nFmt == fourcc('N', 'V', '1', '6')) {
@@ -272,6 +297,20 @@ namespace __10_qdma__ {
 				memset(&args, 0, sizeof(args));
 				args.count = nBuffers;
 				args.buf_type = QVIO_BUF_TYPE_DMABUF;
+
+				if(nFmt == fourcc('Y', '8', '0', '0') || nFmt == fourcc(0, 0, 0, 0)) {
+					args.offset[0] = 0;
+					args.stride[0] = nStride;
+				} else if(nFmt == fourcc('N', 'V', '1', '6')) {
+					args.offset[0] = 0;
+					args.stride[0] = nStride;
+					args.offset[1] = nStride * nHeight;
+					args.stride[1] = nStride;
+				} else {
+					err = EINVAL;
+					LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
+					break;
+				}
 
 				err = ioctl(fd, QVIO_IOC_REQ_BUFS, &args);
 				if(err) {
@@ -327,6 +366,7 @@ namespace __10_qdma__ {
 				{
 					qvio_format args;
 					memset(&args, 0, sizeof(args));
+					LOGD("nFmt=%04X", nFmt);
 					args.fmt = nFmt;
 					args.width = nWidth;
 					args.height = nHeight;
@@ -455,7 +495,7 @@ namespace __10_qdma__ {
 							nBufIdx = args.index;
 						}
 
-						oStatBitRate.Log(nWidth * nHeight * 8, now);
+						oStatBitRate.Log(nFrameSize * 8, now);
 
 						// LOGD("QVIO_IOC_QBUF, nBufIdx=%d", nBufIdx);
 #if 1

@@ -7,6 +7,7 @@ int utils_calc_buf_size(struct qvio_format* format, __u32 offset[4], __u32 strid
 
 	switch(format->fmt) {
 	case FOURCC_Y800:
+	case FOURCC_RGB:
 		*buffer_size = (ssize_t)(offset[0] + stride[0] * format->height);
 		break;
 
@@ -16,6 +17,39 @@ int utils_calc_buf_size(struct qvio_format* format, __u32 offset[4], __u32 strid
 
 	case FOURCC_NV12: // notice! offset[1] covers plane-0
 		*buffer_size = (ssize_t)(offset[1] + stride[1] * (format->height >> 1));
+		break;
+
+	default:
+		pr_err("unexpected value, format->fmt=%08X\n", format->fmt);
+		err = -EINVAL;
+		goto err0;
+		break;
+	}
+
+	return 0;
+
+err0:
+	return err;
+}
+
+int utils_calc_buf_size0(struct qvio_format* format, size_t* buffer_size) {
+	int err;
+
+	switch(format->fmt) {
+	case FOURCC_Y800:
+		*buffer_size = (ssize_t)(format->width * format->height);
+		break;
+
+	case FOURCC_RGB:
+		*buffer_size = (ssize_t)(format->width * 3 * format->height);
+		break;
+
+	case FOURCC_NV16:
+		*buffer_size = (ssize_t)(format->width * format->height * 2);
+		break;
+
+	case FOURCC_NV12:
+		*buffer_size = (ssize_t)(format->width * 3 * (format->height >> 1));
 		break;
 
 	default:

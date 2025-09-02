@@ -19,6 +19,7 @@ NVCC           ?= /usr/local/cuda/bin/nvcc
 COMMON_DIR := ../common
 
 CFLAGS += \
+-O3 \
 -I${COMMON_DIR}
 
 LDFLAGS += \
