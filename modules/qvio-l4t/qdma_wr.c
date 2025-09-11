@@ -242,10 +242,9 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 	dma_addr_t src_addr;
 	dma_addr_t dst_addr;
 	dma_addr_t nxt_addr;
-	int Nxt_adj;
 	ssize_t dma_len;
 	ssize_t sg_bytes;
-	int i;
+	int i, adj_descs;
 
 	buf_entry->dev = qdma_wr->dev;
 	buf_entry->desc_pool = qdma_wr->desc_pool;
@@ -264,6 +263,9 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 		pr_err("utils_calc_buf_size() failed, err=%d\n", err);
 		goto err0;
 	}
+#if 0
+	pr_info("buffer_size=%lu\n", buffer_size);
+#endif
 
 	pDmaBlock = &buf_entry->desc_blocks[0];
 	err = qvio_dma_block_alloc(pDmaBlock, buf_entry->desc_pool, GFP_KERNEL | GFP_DMA);
@@ -273,49 +275,72 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 	}
 
 	pSgdmaDesc = pDmaBlock->cpu_addr;
-	Nxt_adj = nents - 1;
 	src_addr = 0xA0000000;
-
 	sg_bytes = 0;
-	for (i = 0; i < nents && sg_bytes < buffer_size; i++, sg = sg_next(sg), pSgdmaDesc++, Nxt_adj--) {
+	for (i = 0; i < nents; i++, sg = sg_next(sg)) {
 		dst_addr = sg_dma_address(sg);
 		dma_len = sg_dma_len(sg);
 		nxt_addr = pDmaBlock->dma_handle + ((u8*)(pSgdmaDesc + 1) - (u8*)pDmaBlock->cpu_addr);
 
-#if 0
-		pr_warn("%d, src_addr 0x%llx, dst_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d len %d (%d)\n",
-			i, src_addr, dst_addr, nxt_addr, Nxt_adj, dma_len, cpu_to_le32(dma_len));
-#endif
-
-#if 1
-		pSgdmaDesc->control = cpu_to_le32(XDMA_DESC_MAGIC | (Nxt_adj << 8));
-		pSgdmaDesc->bytes = cpu_to_le32(dma_len);
 		pSgdmaDesc->src_addr_lo = cpu_to_le32(PCI_DMA_L(src_addr));
 		pSgdmaDesc->src_addr_hi = cpu_to_le32(PCI_DMA_H(src_addr));
 		pSgdmaDesc->dst_addr_lo = cpu_to_le32(PCI_DMA_L(dst_addr));
 		pSgdmaDesc->dst_addr_hi = cpu_to_le32(PCI_DMA_H(dst_addr));
 		pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
 		pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
-#endif
 
 		sg_bytes += dma_len;
 		src_addr += dma_len;
+
+#if 0
+		pr_info("%d: dma_len=%lu, sg_bytes=%lu\n", i, dma_len, sg_bytes);
+#endif
+
+		if(sg_bytes >= buffer_size) {
+			pSgdmaDesc->bytes = cpu_to_le32(dma_len - (sg_bytes - buffer_size));
+			pSgdmaDesc->next_lo = 0;
+			pSgdmaDesc->next_hi = 0;
+			adj_descs = i;
+			break;
+		}
+
+		pSgdmaDesc->bytes = cpu_to_le32(dma_len);
+
+		pSgdmaDesc++;
 	}
 
-#if 1
-	pSgdmaDesc--;
-	pSgdmaDesc->control |= cpu_to_le32(XDMA_DESC_STOPPED);
-	pSgdmaDesc->next_lo = 0;
-	pSgdmaDesc->next_hi = 0;
+	pSgdmaDesc = pDmaBlock->cpu_addr;
+	for(i = 0;i < adj_descs;i++, pSgdmaDesc++) {
+#if 0
+		pr_warn("%d: bytes %u, src_addr 0x%llx, dst_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d\n",
+			i, le32_to_cpu(pSgdmaDesc->bytes),
+			((u64)(le32_to_cpu(pSgdmaDesc->src_addr_hi)) << 32) | le32_to_cpu(pSgdmaDesc->src_addr_lo),
+			((u64)(le32_to_cpu(pSgdmaDesc->dst_addr_hi)) << 32) | le32_to_cpu(pSgdmaDesc->dst_addr_lo),
+			((u64)(le32_to_cpu(pSgdmaDesc->next_hi)) << 32) | le32_to_cpu(pSgdmaDesc->next_lo),
+			adj_descs - i);
 #endif
+
+		pSgdmaDesc->control = cpu_to_le32(XDMA_DESC_MAGIC | ((adj_descs - i) << 8));
+	}
+
+#if 0
+	pr_warn("%d: bytes %u, src_addr 0x%llx, dst_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d\n",
+		i, le32_to_cpu(pSgdmaDesc->bytes),
+		((u64)(le32_to_cpu(pSgdmaDesc->src_addr_hi)) << 32) | le32_to_cpu(pSgdmaDesc->src_addr_lo),
+		((u64)(le32_to_cpu(pSgdmaDesc->dst_addr_hi)) << 32) | le32_to_cpu(pSgdmaDesc->dst_addr_lo),
+		((u64)(le32_to_cpu(pSgdmaDesc->next_hi)) << 32) | le32_to_cpu(pSgdmaDesc->next_lo),
+		adj_descs - i);
+#endif
+
+	pSgdmaDesc->control = cpu_to_le32(XDMA_DESC_MAGIC | XDMA_DESC_STOPPED);
 
 	buf_entry->dsc_adr = pDmaBlock->dma_handle;
-	buf_entry->dsc_adj = i - 1;
+	buf_entry->dsc_adj = adj_descs;
 #if 0
-	pr_warn("dsc_adr 0x%llx, dsc_adj %u\n", buf_entry->dsc_adr, buf_entry->dsc_adj);
+	pr_warn("---- dsc_adr 0x%llx, dsc_adj %u\n", buf_entry->dsc_adr, buf_entry->dsc_adj);
 #endif
 
-	dma_sync_single_for_device(buf_entry->dev, pDmaBlock->dma_handle, PAGE_SIZE, DMA_FROM_DEVICE);
+	dma_sync_single_for_device(buf_entry->dev, pDmaBlock->dma_handle, PAGE_SIZE, DMA_TO_DEVICE);
 
 	return 0;
 

@@ -76,8 +76,8 @@ namespace __10_qdma__ {
 			nStride = 0;
 			nBuffers = 4;
 			nTimes = nHeight;
-			nBufferType = QVIO_BUF_TYPE_USERPTR;
-			// nBufferType = QVIO_BUF_TYPE_DMABUF;
+			// nBufferType = QVIO_BUF_TYPE_USERPTR;
+			nBufferType = QVIO_BUF_TYPE_DMABUF;
 
 			switch(1) { case 1:
 				ZzUtils::Scoped ZZ_GUARD_NAME([&]() {
