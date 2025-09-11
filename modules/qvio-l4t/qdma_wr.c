@@ -11,7 +11,6 @@
 #include "utils.h"
 
 static struct qvio_cdev_class __cdev_class;
-static const int __reset_mask = 0x01; // [x, x, qdma_wr]
 static const unsigned int __reset_delay = 100;
 
 static void __free(struct kref *ref);
@@ -181,8 +180,6 @@ irqreturn_t qvio_qdma_wr_irq_handler(int irq, void *dev_id) {
 	uintptr_t reg = (uintptr_t)self->reg;
 	u32 value;
 	struct qvio_buf_entry* buf_entry;
-	struct dma_block_t* pDmaBlock;
-	struct xdma_desc* pSgdmaDesc;
 
 #if 1
 	value = io_read_reg(reg, 0x0C); // ISR (ap_done)
@@ -193,38 +190,41 @@ irqreturn_t qvio_qdma_wr_irq_handler(int irq, void *dev_id) {
 
 	io_write_reg(reg, 0x0C, value & 0x01); // ap_done, TOW
 
-	if(value & 0x01) {
 #if 0
-		pr_info("QDMA-WR, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
-		self->irq_counter++;
+	pr_info("QDMA-WR, IRQ[%d]: irq_counter=%d\n", irq, self->irq_counter);
+	self->irq_counter++;
 #endif
 
-		err = qvio_video_queue_done(self->video_queue, &buf_entry);
-		if(err) {
-			pr_err("qvio_video_queue_done() failed, err=%u\n", err);
-			goto err0;
-		}
+	err = qvio_video_queue_done(self->video_queue, &buf_entry);
+	if(err) {
+		pr_err("qvio_video_queue_done() failed, err=%u\n", err);
+		goto err0;
+	}
 
-		if(! buf_entry) {
-			pr_warn("unexpected value, buf_entry=%llX\n", (int64_t)buf_entry);
-			goto err0;
-		}
+	if(! buf_entry) {
+		pr_warn("unexpected value, buf_entry=%llX\n", (int64_t)buf_entry);
+		goto err0;
+	}
 
 #if 0
+	{
+		struct dma_block_t* pDmaBlock;
+		struct xdma_desc* pSgdmaDesc;
+
 		pDmaBlock = &buf_entry->desc_blocks[0];
 		pSgdmaDesc = pDmaBlock->cpu_addr;
 		pr_info("reg[0x00]=0x%x dsc_adr 0x%llx, dsc_adj %u, dst_addr %x:%x\n",
 			io_read_reg(reg, 0x00), buf_entry->dsc_adr, buf_entry->dsc_adj, (u32)pSgdmaDesc->dst_addr_hi, (u32)pSgdmaDesc->dst_addr_lo);
+	}
 #endif
 
 #if 1
-		// try to do another job
-		io_write_reg(reg, 0x10, cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr)));
-		io_write_reg(reg, 0x14, cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr)));
-		io_write_reg(reg, 0x18, buf_entry->dsc_adj);
-		io_write_reg(reg, 0x00, 0x01); // ap_start
+	// try to do another job
+	io_write_reg(reg, 0x10, cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr)));
+	io_write_reg(reg, 0x14, cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr)));
+	io_write_reg(reg, 0x18, buf_entry->dsc_adj);
+	io_write_reg(reg, 0x00, 0x01); // ap_start
 #endif
-	}
 #endif
 
 err0:
@@ -243,6 +243,7 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 	dma_addr_t dst_addr;
 	dma_addr_t nxt_addr;
 	int Nxt_adj;
+	ssize_t dma_len;
 	ssize_t sg_bytes;
 	int i;
 
@@ -278,16 +279,17 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 	sg_bytes = 0;
 	for (i = 0; i < nents && sg_bytes < buffer_size; i++, sg = sg_next(sg), pSgdmaDesc++, Nxt_adj--) {
 		dst_addr = sg_dma_address(sg);
+		dma_len = sg_dma_len(sg);
 		nxt_addr = pDmaBlock->dma_handle + ((u8*)(pSgdmaDesc + 1) - (u8*)pDmaBlock->cpu_addr);
 
 #if 0
-		pr_warn("%d, src_addr 0x%llx, dst_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d len %d\n",
-			i, src_addr, dst_addr, nxt_addr, Nxt_adj, sg_dma_len(sg));
+		pr_warn("%d, src_addr 0x%llx, dst_addr 0x%llx, nxt_addr 0x%llx, Nxt_adj %d len %d (%d)\n",
+			i, src_addr, dst_addr, nxt_addr, Nxt_adj, dma_len, cpu_to_le32(dma_len));
 #endif
 
 #if 1
 		pSgdmaDesc->control = cpu_to_le32(XDMA_DESC_MAGIC | (Nxt_adj << 8));
-		pSgdmaDesc->bytes = sg_dma_len(sg);
+		pSgdmaDesc->bytes = cpu_to_le32(dma_len);
 		pSgdmaDesc->src_addr_lo = cpu_to_le32(PCI_DMA_L(src_addr));
 		pSgdmaDesc->src_addr_hi = cpu_to_le32(PCI_DMA_H(src_addr));
 		pSgdmaDesc->dst_addr_lo = cpu_to_le32(PCI_DMA_L(dst_addr));
@@ -296,8 +298,8 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 		pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
 #endif
 
-		sg_bytes += sg_dma_len(sg);
-		src_addr += sg_dma_len(sg);
+		sg_bytes += dma_len;
+		src_addr += dma_len;
 	}
 
 #if 1
@@ -414,7 +416,7 @@ static int __reset_cores(struct qvio_qdma_wr* self) {
 	struct qvio_zdev* zdev = self->zdev;
 
 	pr_info("reset qdma_wr...\n");
-	err = qvio_zdev_reset_mask(zdev, __reset_mask, __reset_delay);
+	err = qvio_zdev_reset_mask(zdev, self->reset_mask, __reset_delay);
 	if(err < 0) {
 		pr_err("qvio_zdev_reset_mask() failed, err=%d\n", err);
 		goto err0;

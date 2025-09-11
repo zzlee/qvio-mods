@@ -18,6 +18,7 @@ struct qvio_tpg {
 	struct qvio_zdev* zdev;
 	void __iomem * reg;
 	XV_tpg xtpg;
+	int reset_mask;
 
 	struct qvio_format format;
 	struct qvio_tpg_config cur_config;

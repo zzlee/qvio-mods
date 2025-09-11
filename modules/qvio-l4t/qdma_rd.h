@@ -17,6 +17,7 @@ struct qvio_qdma_rd {
 
 	struct qvio_zdev* zdev;
 	void __iomem * reg;
+	int reset_mask;
 	struct qvio_video_queue* video_queue;
 	int irq_counter;
 	struct dma_pool* desc_pool;

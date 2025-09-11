@@ -111,29 +111,14 @@ ssize_t qvio_zdev_attr_ver_show(struct qvio_zdev* self, char *buf) {
 	uintptr_t reg = (uintptr_t)self->reg;
 	u32 nPlatform;
 
-	switch(self->device_id & 0xFFFF) {
-	case 0x7024:
-		nPlatform = io_read_reg(reg, 0x04);
-		ret = snprintf(buf, PAGE_SIZE, "0x%08X %c%c%c%c 0x%08X\n",
-			io_read_reg(reg, 0x00),
-			(char)((nPlatform >> 24) & 0xFF),
-			(char)((nPlatform >> 16) & 0xFF),
-			(char)((nPlatform >> 8) & 0xFF),
-			(char)((nPlatform >> 0) & 0xFF),
-			io_read_reg(reg, 0x08));
-		break;
-
-	default:
-		nPlatform = io_read_reg(reg, 0x14);
-		ret = snprintf(buf, PAGE_SIZE, "0x%08X %c%c%c%c 0x%08X\n",
-			io_read_reg(reg, 0x10),
-			(char)((nPlatform >> 24) & 0xFF),
-			(char)((nPlatform >> 16) & 0xFF),
-			(char)((nPlatform >> 8) & 0xFF),
-			(char)((nPlatform >> 0) & 0xFF),
-			io_read_reg(reg, 0x18));
-		break;
-	}
+	nPlatform = io_read_reg(reg, 0x04);
+	ret = snprintf(buf, PAGE_SIZE, "0x%08X %c%c%c%c 0x%08X\n",
+		io_read_reg(reg, 0x00),
+		(char)((nPlatform >> 24) & 0xFF),
+		(char)((nPlatform >> 16) & 0xFF),
+		(char)((nPlatform >> 8) & 0xFF),
+		(char)((nPlatform >> 0) & 0xFF),
+		io_read_reg(reg, 0x08));
 
 	return ret;
 }
@@ -142,15 +127,7 @@ ssize_t qvio_zdev_attr_ticks_show(struct qvio_zdev* self, char *buf) {
 	ssize_t ret;
 	uintptr_t reg = (uintptr_t)self->reg;
 
-	switch(self->device_id & 0xFFFF) {
-	case 0x7024:
-		ret = snprintf(buf, PAGE_SIZE, "%u\n", io_read_reg(reg, 0x0C));
-		break;
-
-	default:
-		ret = snprintf(buf, PAGE_SIZE, "%u\n", io_read_reg(reg, 0x1C));
-		break;
-	}
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", io_read_reg(reg, 0x0C));
 
 	return ret;
 }
@@ -159,15 +136,7 @@ ssize_t qvio_zdev_attr_value0_show(struct qvio_zdev* self, char *buf) {
 	ssize_t ret;
 	uintptr_t reg = (uintptr_t)self->reg;
 
-	switch(self->device_id & 0xFFFF) {
-	case 0x7024:
-		ret = snprintf(buf, PAGE_SIZE, "%u\n", io_read_reg(reg, 0x14));
-		break;
-
-	default:
-		ret = snprintf(buf, PAGE_SIZE, "%u\n", 0);
-		break;
-	}
+	ret = snprintf(buf, PAGE_SIZE, "%u\n", io_read_reg(reg, 0x14));
 
 	return ret;
 }
@@ -177,15 +146,7 @@ ssize_t qvio_zdev_attr_value0_store(struct qvio_zdev* self, const char *buf, siz
 	int value0;
 
 	sscanf(buf, "%d", &value0);
-
-	switch(self->device_id & 0xFFFF) {
-	case 0x7024:
-		io_write_reg(reg, 0x14, value0);
-		break;
-
-	default:
-		break;
-	}
+	io_write_reg(reg, 0x14, value0);
 
 	return count;
 }
@@ -213,15 +174,7 @@ static long __file_ioctl_g_ticks(struct file * filp, unsigned long arg) {
 	struct qvio_g_ticks args;
 	uintptr_t reg = (uintptr_t)self->reg;
 
-	switch(self->device_id) {
-	case 0x7024:
-		args.ticks = io_read_reg(reg, 0x0C);
-		break;
-
-	default:
-		args.ticks = io_read_reg(reg, 0x1C);
-		break;
-	}
+	args.ticks = io_read_reg(reg, 0x0C);
 
 	ret = copy_to_user((void __user *)arg, &args, sizeof(args));
 	if (ret != 0) {

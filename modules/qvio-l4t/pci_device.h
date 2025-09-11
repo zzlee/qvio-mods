@@ -10,6 +10,10 @@
 #include "qdma_wr.h"
 #include "qdma_rd.h"
 #include "tpg.h"
+#include "xdma_wr.h"
+#include "xdma_rd.h"
+
+#define QVIO_DRV_MODULE_NAME "qvio-l4t"
 
 struct qvio_pci_device {
 	struct kref ref;
@@ -27,7 +31,6 @@ struct qvio_pci_device {
 	int msi_enabled;
 	int msix_enabled;
 	int irq_lines[8];
-	int irq_counter;
 
 	// DMA block for test
 	struct dma_pool* desc_pool;
@@ -39,10 +42,15 @@ struct qvio_pci_device {
 	int test_case;
 
 	struct qvio_zdev* zdev;
-	void __iomem * reg_intr;
+	void __iomem* reg_intr;
 	struct qvio_qdma_wr* qdma_wr;
 	struct qvio_qdma_rd* qdma_rd;
 	struct qvio_tpg* tpg;
+	void __iomem* qvio_axis_src;
+	void __iomem* qvio_axis_sink;
+	struct qvio_xdma_wr* xdma_wr;
+	struct qvio_xdma_rd* xdma_rd;
+	struct mutex mutex_xdma_irq_block;
 };
 
 int qvio_pci_device_register(void);

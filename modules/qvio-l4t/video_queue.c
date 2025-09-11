@@ -513,6 +513,8 @@ static long __file_ioctl_qbuf_userptr(struct qvio_video_queue* self, struct file
 		goto err4;
 	}
 
+	// utils_sgt_dump(sgt, true);
+
 	dma_sync_sgtable_for_device(self->dev, sgt, dma_dir);
 
 	buf_entry = qvio_buf_entry_new();
@@ -592,7 +594,7 @@ static long __file_ioctl_qbuf_dmabuf(struct qvio_video_queue* self, struct file 
 		goto err3;
 	}
 
-	// sgt_dump(sgt, true);
+	// utils_sgt_dump(sgt, true);
 
 	buf_entry = qvio_buf_entry_new();
 	if(! buf_entry) {
@@ -685,7 +687,7 @@ static long __file_ioctl_qbuf_mmap(struct qvio_video_queue* self, struct file * 
 		goto err3;
 	}
 
-	// sgt_dump(sgt, true);
+	// utils_sgt_dump(sgt, true);
 
 	buf_entry = qvio_buf_entry_new();
 	if(! buf_entry) {

@@ -14,6 +14,9 @@ struct qvio_xdma_rd {
 	uint32_t device_id;
 	struct qvio_cdev cdev;
 
+	void __iomem * reg;
+	int channel;
+	struct mutex* mutex_irq_block;
 	struct qvio_video_queue* video_queue;
 	int irq_counter;
 	struct dma_pool* desc_pool;

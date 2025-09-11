@@ -68,9 +68,9 @@ namespace __10_qdma__ {
 
 			LOGD("%s::%s", typeid(self_t).name(), __FUNCTION__);
 
-			nFmt = fourcc(0, 0, 0, 0); // RGB
+			// nFmt = fourcc(0, 0, 0, 0); // RGB
 			// nFmt = fourcc('Y', '8', '0', '0');
-			// nFmt = fourcc('N', 'V', '1', '6');
+			nFmt = fourcc('N', 'V', '1', '6');
 			nWidth = 4096;
 			nHeight = 2160;
 			nStride = 0;
@@ -95,7 +95,6 @@ namespace __10_qdma__ {
 					LOGE("%s(%d): unexpected value, nFmt=0x%08X", __FUNCTION__, __LINE__, nFmt);
 					break;
 				}
-
 
 				switch(nBufferType) {
 				case QVIO_BUF_TYPE_USERPTR:
@@ -203,10 +202,12 @@ namespace __10_qdma__ {
 						switch(ch) {
 						case '1':
 							OnTest1(now, "/dev/qdma_wr0", QVIO_BUF_DIR_FROM_DEVICE);
+							// OnTest1(now, "/dev/xdma_wr0", QVIO_BUF_DIR_FROM_DEVICE);
 							break;
 
 						case '2':
 							OnTest1(now, "/dev/qdma_rd0", QVIO_BUF_DIR_TO_DEVICE);
+							// OnTest1(now, "/dev/xdma_rd0", QVIO_BUF_DIR_TO_DEVICE);
 							break;
 						}
 					}

@@ -10,7 +10,6 @@
 #include "xvidc.h"
 
 static struct qvio_cdev_class __cdev_class;
-static const int __reset_mask = 0x04; // [tpg, x, x]
 static const unsigned int __reset_delay = 100;
 
 static void __free(struct kref *ref);
@@ -162,8 +161,8 @@ static int __reset_cores(struct qvio_tpg* self) {
 	int err;
 	struct qvio_zdev* zdev = self->zdev;
 
-	pr_info("reset tpg...\n");
-	err = qvio_zdev_reset_mask(zdev, __reset_mask, __reset_delay);
+	pr_info("reset tpg... (0x%x)\n", self->reset_mask);
+	err = qvio_zdev_reset_mask(zdev, self->reset_mask, __reset_delay);
 	if(err < 0) {
 		pr_err("qvio_zdev_reset_mask() failed, err=%d\n", err);
 		goto err0;
@@ -213,12 +212,12 @@ static long __file_ioctl_s_fmt(struct qvio_tpg* self, struct file * filp, unsign
 	long ret;
 	struct qvio_format args;
 
-ret = copy_from_user(&args, (void __user *)arg, sizeof(args));
+	ret = copy_from_user(&args, (void __user *)arg, sizeof(args));
 	if (ret != 0) {
-
 		ret = -EFAULT;
 		goto err0;
 	}
+
 	switch(args.fmt) {
 	case FOURCC_RGB:
 		self->nXtpgColorFormat = 0; // TPG RGB

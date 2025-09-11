@@ -16,13 +16,15 @@ qvio-objs := \
 	zdev.o \
 	qdma_wr.o \
 	qdma_rd.o \
-	tpg.o
+	tpg.o \
+	xdma_wr.o \
+	xdma_rd.o
 
 qvio-objs += \
 	video.o \
 	queue.o
 
-qvio-objs += pci_device.o
+qvio-objs += pci_device.o pci_device_7024.o pci_device_e382.o
 # qvio-objs += platform_device.o
 
 ccflags-y += \
