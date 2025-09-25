@@ -324,13 +324,14 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 	for (i = 0; i < nents; i++, sg = sg_next(sg)) {
 		dst_addr = sg_dma_address(sg);
 		dma_len = sg_dma_len(sg);
+		nxt_addr = pDmaBlock->dma_handle + ((u8*)(pSgdmaDesc + 1) - (u8*)pDmaBlock->cpu_addr);
 
 		pSgdmaDesc->src_addr_lo = cpu_to_le32(PCI_DMA_L(src_addr));
 		pSgdmaDesc->src_addr_hi = cpu_to_le32(PCI_DMA_H(src_addr));
 		pSgdmaDesc->dst_addr_lo = cpu_to_le32(PCI_DMA_L(dst_addr));
 		pSgdmaDesc->dst_addr_hi = cpu_to_le32(PCI_DMA_H(dst_addr));
-		pSgdmaDesc->next_lo = 0;
-		pSgdmaDesc->next_hi = 0;
+		pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
+		pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
 
 		sg_bytes += dma_len;
 		src_addr += dma_len;
@@ -341,6 +342,8 @@ static int __buf_entry_from_sgt(struct qvio_video_queue* self, struct sg_table* 
 
 		if(sg_bytes >= buffer_size) {
 			pSgdmaDesc->bytes = cpu_to_le32(dma_len - (sg_bytes - buffer_size));
+			pSgdmaDesc->next_lo = 0;
+			pSgdmaDesc->next_hi = 0;
 			adj_descs = i;
 			break;
 		}
@@ -397,8 +400,8 @@ static int __start_buf_entry(struct qvio_video_queue* self, struct qvio_buf_entr
 	u32 value;
 
 #if 1
-	value = io_read_reg(irq_block, 0x14);
-	io_write_reg(irq_block, 0x14, value | BIT(1)); // W1S engine_int_req[1]
+	// value = io_read_reg(irq_block, 0x14);
+	// io_write_reg(irq_block, 0x14, value | BIT(1)); // W1S engine_int_req[1]
 	io_write_reg(c2h_sgdma, 0x80, cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr)));
 	io_write_reg(c2h_sgdma, 0x84, cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr)));
 	io_write_reg(c2h_sgdma, 0x88, buf_entry->dsc_adj);
@@ -416,10 +419,10 @@ static int __streamon(struct qvio_video_queue* self) {
 	u32 value;
 
 	// IRQ Block Channel Interrupt Enable Mask
-	value = io_read_reg(irq_block, 0x10);
-	io_write_reg(irq_block, 0x10, value | BIT(1)); // Enable engine_int_req[1]
-	value = io_read_reg(irq_block, 0x18);
-	io_write_reg(irq_block, 0x18, value | BIT(1)); // W1C engine_int_req[1]
+	// value = io_read_reg(irq_block, 0x10);
+	io_write_reg(irq_block, 0x14, BIT(1)); // W1S channel_int_enmask[1]
+	// value = io_read_reg(irq_block, 0x18);
+	// io_write_reg(irq_block, 0x18, value | BIT(1)); // W1C channel_int_enmask[1]
 
 	io_write_reg(c2h_channel, 0x90, BIT(1)); // im_descriptor_stopped
 
@@ -441,6 +444,7 @@ irqreturn_t qvio_xdma_wr_irq_handler(int irq, void *dev_id) {
 	uintptr_t c2h_channel = (uintptr_t)((u64)self->reg + xdma_mkaddr(0x1, self->channel, 0));
 	uintptr_t c2h_sgdma = (uintptr_t)((u64)self->reg + xdma_mkaddr(0x5, self->channel, 0));
 	u32 engine_int_req, engine_int_pend;
+	u32 compl_descriptor_count;
 	u32 Status;
 	u32 value;
 	struct qvio_buf_entry* buf_entry;
@@ -451,15 +455,16 @@ irqreturn_t qvio_xdma_wr_irq_handler(int irq, void *dev_id) {
 #endif
 
 	engine_int_req = io_read_reg(irq_block, 0x44);
-	engine_int_pend = io_read_reg(irq_block, 0x4C);
+	// engine_int_pend = io_read_reg(irq_block, 0x4C);
+	compl_descriptor_count = io_read_reg(c2h_channel, 0x48);
 
 	// pr_info("engine_int_req=0x%X engine_int_pend=0x%X\n", engine_int_req, engine_int_pend);
 	if(! (engine_int_req & BIT(1))) { // C2H engine_int_req[1]
 		return IRQ_NONE;
 	}
 
-	io_write_reg(irq_block, 0x18, BIT(1)); // W1C engine_int_req[1]
-	Status = io_read_reg(c2h_channel, 0x44);
+	io_write_reg(irq_block, 0x18, BIT(1)); // W1C channel_int_enmask[1]
+	Status = io_read_reg(c2h_channel, 0x44); // engine_int_req
 	// pr_info("Engine Interrupt C2H, Status=%d\n", Status);
 
 	io_write_reg(c2h_channel, 0x04, 0); // Stop
@@ -477,8 +482,8 @@ irqreturn_t qvio_xdma_wr_irq_handler(int irq, void *dev_id) {
 
 #if 1
 	// try to do another job
-	value = io_read_reg(irq_block, 0x14);
-	io_write_reg(irq_block, 0x14, value | BIT(1)); // W1S engine_int_req[1]
+	// value = io_read_reg(irq_block, 0x10);
+	io_write_reg(irq_block, 0x14, BIT(1)); // W1S channel_int_enmask[1]
 	io_write_reg(c2h_sgdma, 0x80, cpu_to_le32(PCI_DMA_L(buf_entry->dsc_adr)));
 	io_write_reg(c2h_sgdma, 0x84, cpu_to_le32(PCI_DMA_H(buf_entry->dsc_adr)));
 	io_write_reg(c2h_sgdma, 0x88, buf_entry->dsc_adj);

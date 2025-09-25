@@ -59,7 +59,7 @@ int device_e382_probe(struct qvio_pci_device* self) {
 		goto err6;
 	}
 
-#if 0
+#if 1
 	self->xdma_wr->dev = self->dev;
 	self->xdma_wr->device_id = self->device_id;
 	self->xdma_wr->reg = (void __iomem *)self->bar[1];
@@ -137,7 +137,7 @@ err0:
 }
 
 void device_e382_remove(struct qvio_pci_device* self) {
-#if 0
+#if 1
 	qvio_tpg_remove(self->tpg);
 	qvio_xdma_rd_remove(self->xdma_rd);
 	qvio_xdma_wr_remove(self->xdma_wr);
@@ -174,9 +174,10 @@ int device_e382_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev) {
 	io_write_reg(irq_block, 0x80, value);
 #endif
 
-#if 0 // Channel Interupt
+#if 1 // Channel Interupt
 	if(self->msi_enabled) {
 		irq_count = pci_msi_vec_count(pdev);
+
 		if(irq_count >= 2) {
 			irqreturn_t (*irq_handler_map[])(int irq, void *dev_id) = {
 				qvio_xdma_rd_irq_handler,
@@ -210,8 +211,9 @@ int device_e382_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev) {
 
 			// IRQ Block Channel Vector Number
 			value = io_read_reg(irq_block, 0xA0);
-			value = (value & ~(0x1F << 0)) | (0 << 0); // Map engine_int_req[0] to MSI-X Vector 0
-			value = (value & ~(0x1F << 8)) | (1 << 8); // Map engine_int_req[1] to MSI-X Vector 1
+			value = (value & ~(0x1F << 0)) | (0 << 0); // Map channel_int[0] to MSI-X Vector 0
+			value = (value & ~(0x1F << 5)) | (1 << 5); // Map channel_int[1] to MSI-X Vector 1
+			pr_info("channel_int=%X\n", value);
 			io_write_reg(irq_block, 0xA0, value);
 		} else if(irq_count >= 1) {
 			i = 0;
@@ -232,8 +234,8 @@ int device_e382_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev) {
 
 			// IRQ Block Channel Vector Number
 			value = io_read_reg(irq_block, 0xA0);
-			value = (value & ~(0x1F << 0)) | (0 << 0); // Map engine_int_req[0] to MSI-X Vector 0
-			value = (value & ~(0x1F << 8)) | (0 << 8); // Map engine_int_req[1] to MSI-X Vector 0
+			value = (value & ~(0x1F << 0)) | (0 << 0); // Map channel_int[0] to MSI-X Vector 0
+			value = (value & ~(0x1F << 5)) | (0 << 5); // Map channel_int[1] to MSI-X Vector 0
 			io_write_reg(irq_block, 0xA0, value);
 		}
 	}
