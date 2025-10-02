@@ -400,3 +400,65 @@ irqreturn_t qvio_xdma_rd_irq_handler(int irq, void *dev_id) {
 
 	return IRQ_NONE;
 }
+
+int qvio_xdma_rd_test_case_0(struct qvio_xdma_rd* self, struct dma_block_t* dma_blocks) {
+#if 0
+	int err;
+	u32* xdma_irq_block;
+	u32* xdma_h2c_channel;
+	u32* xdma_h2c_sgdma;
+	dma_addr_t sgdma_desc;
+	struct xdma_desc* pSgdmaDesc;
+	dma_addr_t src_addr;
+	u8* pSrc;
+	dma_addr_t dst_addr;
+	dma_addr_t nxt_addr;
+	int i;
+
+	xdma_irq_block = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x2, 0, 0));
+	xdma_h2c_channel = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x0, 0, 0));
+	xdma_h2c_sgdma = (u32*)((u8*)self->bar[1] + xdma_mkaddr(0x4, 0, 0));
+	sgdma_desc = self->dma_blocks[0].dma_handle;
+	pSgdmaDesc = (struct xdma_desc*)self->dma_blocks[0].cpu_addr;
+	src_addr = self->dma_blocks[1].dma_handle;
+	pSrc = self->dma_blocks[1].cpu_addr;
+	dst_addr = 0xA0000000;
+	nxt_addr = 0;
+
+	for(i = 0;i < 4096;i++) {
+		pSrc[i] = i & 0xFF;
+	}
+
+	dma_sync_single_for_device(self->dev, src_addr, 4096, DMA_TO_DEVICE);
+
+	pSgdmaDesc->control = cpu_to_le32(DESC_MAGIC | XDMA_DESC_STOPPED);
+	pSgdmaDesc->bytes = cpu_to_le32(4096);
+	pSgdmaDesc->src_addr_lo = cpu_to_le32(PCI_DMA_L(src_addr));
+	pSgdmaDesc->src_addr_hi = cpu_to_le32(PCI_DMA_H(src_addr));
+	pSgdmaDesc->dst_addr_lo = cpu_to_le32(PCI_DMA_L(dst_addr));
+	pSgdmaDesc->dst_addr_hi = cpu_to_le32(PCI_DMA_H(dst_addr));
+	pSgdmaDesc->next_lo = cpu_to_le32(PCI_DMA_L(nxt_addr));
+	pSgdmaDesc->next_hi = cpu_to_le32(PCI_DMA_H(nxt_addr));
+
+	pr_info("H2C Channel Identifier: 0x%08X\n", xdma_h2c_channel[0x00 >> 2]);
+	pr_info("H2C SGDMA Identifier: 0x%08X\n", xdma_h2c_sgdma[0x00 >> 2]);
+	pr_info("H2C Channel Status: 0x%X\n", xdma_h2c_channel[0x40 >> 2]);
+	pr_info("H2C Channel Completed Descriptor Count: %d\n", xdma_h2c_channel[0x48 >> 2]);
+
+	xdma_irq_block[0x14 >> 2] = 0x01; // W1S engine_int_req[0:0]
+
+	xdma_h2c_sgdma[0x80 >> 2] = cpu_to_le32(PCI_DMA_L(sgdma_desc));
+	xdma_h2c_sgdma[0x84 >> 2] = cpu_to_le32(PCI_DMA_H(sgdma_desc));
+	xdma_h2c_sgdma[0x88 >> 2] = 0;
+
+	xdma_h2c_channel[0x04 >> 2] = BIT(0) | BIT(2); // Run & ie_descriptor_completed
+
+	msleep(1000);
+
+	pr_info("H2C Channel Completed Descriptor Count: %d\n", xdma_h2c_channel[0x48 >> 2]);
+
+	xdma_h2c_channel[0x04 >> 2] = 0;
+#endif
+
+	return 0;
+}

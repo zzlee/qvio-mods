@@ -322,6 +322,7 @@ namespace __10_qdma__ {
 
 			return err;
 		}
+
 		int EnqueueBuffer_nvbuf(int fd, int nIndex, qvio_buf_dir dir) {
 			int err;
 

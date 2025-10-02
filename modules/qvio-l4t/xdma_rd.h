@@ -6,6 +6,7 @@
 
 #include "cdev.h"
 #include "video_queue.h"
+#include "dma_block.h"
 
 struct qvio_xdma_rd {
 	struct kref ref;
@@ -36,5 +37,8 @@ int qvio_xdma_rd_probe(struct qvio_xdma_rd* self);
 void qvio_xdma_rd_remove(struct qvio_xdma_rd* self);
 
 irqreturn_t qvio_xdma_rd_irq_handler(int irq, void *dev_id);
+
+// test cases
+int qvio_xdma_rd_test_case_0(struct qvio_xdma_rd* self, struct dma_block_t* dma_blocks);
 
 #endif // __QVIO_XDMA_RD_H__

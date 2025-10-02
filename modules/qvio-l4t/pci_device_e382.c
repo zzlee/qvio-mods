@@ -212,8 +212,8 @@ int device_e382_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev) {
 			// IRQ Block Channel Vector Number
 			value = io_read_reg(irq_block, 0xA0);
 			value = (value & ~(0x1F << 0)) | (0 << 0); // Map channel_int[0] to MSI-X Vector 0
-			value = (value & ~(0x1F << 5)) | (1 << 5); // Map channel_int[1] to MSI-X Vector 1
-			pr_info("channel_int=%X\n", value);
+			value = (value & ~(0x1F << 8)) | (1 << 8); // Map channel_int[1] to MSI-X Vector 1
+			pr_info("channel_int=0x%X\n", value);
 			io_write_reg(irq_block, 0xA0, value);
 		} else if(irq_count >= 1) {
 			i = 0;
@@ -235,7 +235,7 @@ int device_e382_irq_setup(struct qvio_pci_device* self, struct pci_dev* pdev) {
 			// IRQ Block Channel Vector Number
 			value = io_read_reg(irq_block, 0xA0);
 			value = (value & ~(0x1F << 0)) | (0 << 0); // Map channel_int[0] to MSI-X Vector 0
-			value = (value & ~(0x1F << 5)) | (0 << 5); // Map channel_int[1] to MSI-X Vector 0
+			value = (value & ~(0x1F << 8)) | (0 << 8); // Map channel_int[1] to MSI-X Vector 0
 			io_write_reg(irq_block, 0xA0, value);
 		}
 	}
