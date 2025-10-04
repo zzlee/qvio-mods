@@ -209,6 +209,10 @@ namespace __10_qdma__ {
 							// OnTest1(now, "/dev/qdma_rd0", QVIO_BUF_DIR_TO_DEVICE);
 							OnTest1(now, "/dev/xdma_rd0", QVIO_BUF_DIR_TO_DEVICE);
 							break;
+
+						case '3':
+							OnTest1(now, "/dev/qdma_wr1", QVIO_BUF_DIR_FROM_DEVICE);
+							break;
 						}
 					}
 

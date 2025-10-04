@@ -397,7 +397,6 @@ err0:
 
 int qvio_xdma_wr_test_case_0(struct qvio_xdma_wr* self, struct dma_block_t* dma_blocks) {
 	int err;
-	uintptr_t irq_block = (uintptr_t)((u64)self->reg + xdma_mkaddr(0x2, self->channel, 0));
 	uintptr_t c2h_channel = (uintptr_t)((u64)self->reg + xdma_mkaddr(0x1, self->channel, 0));
 	uintptr_t c2h_sgdma = (uintptr_t)((u64)self->reg + xdma_mkaddr(0x5, self->channel, 0));
 	dma_addr_t sgdma_desc;

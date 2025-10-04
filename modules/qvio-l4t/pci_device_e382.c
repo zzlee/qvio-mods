@@ -283,9 +283,12 @@ static irqreturn_t __irq_handler(int irq, void *dev_id) {
 	irqreturn_t ret;
 
 	ret = qvio_xdma_rd_irq_handler(irq, self->xdma_rd);
-	if(ret == IRQ_NONE) {
-		ret = qvio_xdma_wr_irq_handler(irq, self->xdma_wr);
-	}
+	if(ret != IRQ_NONE)
+		return ret;
+
+	ret = qvio_xdma_wr_irq_handler(irq, self->xdma_wr);
+	if(ret != IRQ_NONE)
+		return ret;
 
 	return ret;
 }
