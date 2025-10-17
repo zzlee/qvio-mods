@@ -45,6 +45,7 @@ struct qvio_pci_device {
 	void __iomem* reg_intr;
 	struct qvio_qdma_wr* qdma_wr_0;
 	struct qvio_qdma_wr* qdma_wr_1;
+	struct qvio_qdma_wr* qdma_wr_2;
 	struct qvio_qdma_rd* qdma_rd;
 	struct qvio_tpg* tpg;
 	void __iomem* qvio_axis_src;

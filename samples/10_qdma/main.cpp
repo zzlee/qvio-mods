@@ -68,16 +68,16 @@ namespace __10_qdma__ {
 
 			LOGD("%s::%s", typeid(self_t).name(), __FUNCTION__);
 
-			// nFmt = fourcc(0, 0, 0, 0); // RGB
+			nFmt = fourcc(0, 0, 0, 0); // RGB
 			// nFmt = fourcc('Y', '8', '0', '0');
-			nFmt = fourcc('N', 'V', '1', '6');
+			// nFmt = fourcc('N', 'V', '1', '6');
 			nWidth = 4096;
 			nHeight = 2160;
 			nStride = 0;
 			nBuffers = 4;
 			nTimes = nHeight;
-			// nBufferType = QVIO_BUF_TYPE_USERPTR;
-			nBufferType = QVIO_BUF_TYPE_DMABUF;
+			nBufferType = QVIO_BUF_TYPE_USERPTR;
+			// nBufferType = QVIO_BUF_TYPE_DMABUF;
 
 			switch(1) { case 1:
 				ZzUtils::Scoped ZZ_GUARD_NAME([&]() {
@@ -201,17 +201,21 @@ namespace __10_qdma__ {
 
 						switch(ch) {
 						case '1':
-							// OnTest1(now, "/dev/qdma_wr0", QVIO_BUF_DIR_FROM_DEVICE);
-							OnTest1(now, "/dev/xdma_wr0", QVIO_BUF_DIR_FROM_DEVICE);
+							OnTest1(now, "/dev/qdma_wr0", QVIO_BUF_DIR_FROM_DEVICE);
+							// OnTest1(now, "/dev/xdma_wr0", QVIO_BUF_DIR_FROM_DEVICE);
 							break;
 
 						case '2':
-							// OnTest1(now, "/dev/qdma_rd0", QVIO_BUF_DIR_TO_DEVICE);
-							OnTest1(now, "/dev/xdma_rd0", QVIO_BUF_DIR_TO_DEVICE);
+							OnTest1(now, "/dev/qdma_rd0", QVIO_BUF_DIR_TO_DEVICE);
+							// OnTest1(now, "/dev/xdma_rd0", QVIO_BUF_DIR_TO_DEVICE);
 							break;
 
 						case '3':
 							OnTest1(now, "/dev/qdma_wr1", QVIO_BUF_DIR_FROM_DEVICE);
+							break;
+
+						case '4':
+							OnTest1(now, "/dev/qdma_wr2", QVIO_BUF_DIR_FROM_DEVICE);
 							break;
 						}
 					}
