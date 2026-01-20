@@ -20,11 +20,11 @@ static inline uint32_t fourcc(char a, char b, char c, char d) {
 }
 
 static inline void io_write_reg(uintptr_t BaseAddress, int RegOffset, u32 Data) {
-    iowrite32(Data, (volatile void *)(BaseAddress + RegOffset));
+    iowrite32(Data, (void *)(BaseAddress + RegOffset));
 }
 
 static inline u32 io_read_reg(uintptr_t BaseAddress, int RegOffset) {
-    return ioread32((const volatile void *)(BaseAddress + RegOffset));
+    return ioread32((const void *)(BaseAddress + RegOffset));
 }
 
 int utils_calc_buf_size(struct qvio_format* format, __u32 offset[4], __u32 stride[4], size_t* buffer_size);

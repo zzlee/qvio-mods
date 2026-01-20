@@ -46,11 +46,11 @@ extern "C" {
 
 static inline void Xil_Out32(INTPTR Addr, u32 Value)
 {
-	iowrite32(Value, (volatile void *)Addr);
+	iowrite32(Value, (void *)Addr);
 }
 static inline u32 Xil_In32(INTPTR Addr)
 {
-	return ioread32((const volatile void *)Addr);
+	return ioread32((const void *)Addr);
 }
 
 #endif /* end of protection macro */

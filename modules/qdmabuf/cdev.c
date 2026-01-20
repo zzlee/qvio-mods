@@ -106,7 +106,7 @@ int qdmabuf_cdev_open(struct inode *inode, struct file *filp) {
 }
 
 int qdmabuf_cdev_release(struct inode *inode, struct file *filep) {
-	struct qdmabuf_cdev* self = container_of(inode->i_cdev, struct qdmabuf_cdev, cdev);
+	// struct qdmabuf_cdev* self = container_of(inode->i_cdev, struct qdmabuf_cdev, cdev);
 
 	// pr_info("self=%p\n", self);
 

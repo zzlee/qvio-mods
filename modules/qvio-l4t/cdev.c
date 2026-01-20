@@ -106,7 +106,7 @@ int qvio_cdev_open(struct inode *inode, struct file *filp) {
 }
 
 int qvio_cdev_release(struct inode *inode, struct file *filep) {
-	struct qvio_cdev* self = container_of(inode->i_cdev, struct qvio_cdev, cdev);
+	// struct qvio_cdev* self = container_of(inode->i_cdev, struct qvio_cdev, cdev);
 
 	// pr_info("self=%p\n", self);
 

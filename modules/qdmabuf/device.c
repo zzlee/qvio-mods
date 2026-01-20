@@ -139,7 +139,7 @@ static struct qdmabuf_device* __device_new(void) {
 	return self;
 }
 
-static struct qdmabuf_device* __device_get(struct qdmabuf_device* self) {
+static __attribute__((unused)) struct qdmabuf_device* __device_get(struct qdmabuf_device* self) {
 	if (self)
 		kref_get(&self->ref);
 
