@@ -184,13 +184,13 @@ static void do_test_case(struct qvio_pci_device* self, int test_case) {
 	switch(test_case) {
 	case 0:
 		pr_info("+test_case %d\n", test_case);
-		// do_test_case_0(self);
+		qvio_xdma_wr_test_case_0(self->xdma_wr, self->dma_blocks);
 		pr_info("-test_case %d\n", test_case);
 		break;
 
 	case 1:
 		pr_info("+test_case %d\n", test_case);
-		// do_test_case_1(self);
+		qvio_xdma_rd_test_case_0(self->xdma_rd, self->dma_blocks);
 		pr_info("-test_case %d\n", test_case);
 		break;
 
